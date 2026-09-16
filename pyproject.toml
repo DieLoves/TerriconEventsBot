@@ -36,6 +36,9 @@ packages = ["src/terricon_events_bot"]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "postgres: requires TEST_DATABASE_URL pointing to an isolated PostgreSQL database",
+]
 
 [tool.ruff]
 target-version = "py313"

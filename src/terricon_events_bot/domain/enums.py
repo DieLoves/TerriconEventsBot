@@ -62,3 +62,65 @@ class BroadcastStatus(StrEnum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     FAILED = "failed"
+
+
+class TranslationSource(StrEnum):
+    OFFICIAL = "official"
+    MACHINE = "machine"
+
+
+class ClassificationStatus(StrEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    RETRY_WAIT = "retry_wait"
+    FALLBACK = "fallback"
+
+
+class SyncTrigger(StrEnum):
+    STARTUP = "startup"
+    SCHEDULED = "scheduled"
+    MANUAL = "manual"
+
+
+class SyncRunStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class SyncEndpointStatus(StrEnum):
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class DeliveryStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    SENT = "sent"
+    RETRY_WAIT = "retry_wait"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+
+
+class FeedbackKind(StrEnum):
+    ERROR = "error"
+    IDEA = "idea"
+    OTHER = "other"
+
+
+class FeedbackAuthor(StrEnum):
+    USER = "user"
+    ADMIN = "admin"
+
+
+class BroadcastAudience(StrEnum):
+    RU = "ru"
+    KZ = "kz"
+    BOTH = "both"
+
+
+class OpenAIOperation(StrEnum):
+    CLASSIFICATION = "classification"
+    TRANSLATION = "translation"

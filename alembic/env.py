@@ -8,7 +8,10 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from terricon_events_bot.infrastructure import models
 from terricon_events_bot.infrastructure.database import Base, normalize_async_database_url
+
+_ = models
 
 config = context.config
 if config.config_file_name is not None:

@@ -2,14 +2,14 @@
 
 ## Objective
 
-Начать реализацию Terricon Events Bot v1 строго по утверждённой спецификации и техническому плану, не пересматривая согласованные требования без прямого запроса пользователя.
+Продолжать реализацию Terricon Events Bot v1 строго по утверждённой спецификации и техническому плану, выполняя по одному этапу и останавливаясь после каждого для подтверждения пользователя.
 
 ## Current state
 
-- Проект greenfield: исходного кода, зависимостей, миграций и тестов пока нет.
-- Утверждённые спецификация и технический план сохранены в `docs/`.
-- В корне есть пользовательский `.env` только с базовым URL Terricon API; его содержимое и формат нужно сохранить, секреты не выводить и не коммитить.
-- Реализация ещё не начиналась.
+- Этапы 1 и 2 технического плана реализованы.
+- Проект использует Python 3.13/uv, типизированную конфигурацию, SQLAlchemy models и пять последовательных Alembic-миграций.
+- В корне есть пользовательский `.env`; его содержимое нужно сохранять, не выводить и не коммитить.
+- Следующий этап после подтверждения пользователя — импорт Terricon API.
 
 ## Completed
 
@@ -18,6 +18,9 @@
 - Сохранена полная спецификация v1.
 - Сохранён decision-complete технический план реализации.
 - Подтверждено, что существующей архитектуры, конфликтующей со спецификацией, нет.
+- Завершён этап 1: scaffold, configuration/composition root, async SQLAlchemy/UoW, Alembic, доменные enum, RU/KZ locales, asset resolver и безопасное логирование.
+- Завершён этап 2: полная PostgreSQL-схема для users/events/sync/subscriptions/outbox/feedback/broadcast/operations, разбитая на пять миграций.
+- Добавлены unit schema tests и opt-in PostgreSQL integration tests для миграций, ограничений подписок и идемпотентности delivery.
 
 ## Key decisions
 
@@ -26,42 +29,46 @@
 - Production — один long-polling экземпляр без Redis; durable state, FSM, outbox и очереди находятся в PostgreSQL.
 - GPT используется только для классификации и аварийного перевода отсутствующей локали события; статический интерфейс и admin-рассылки не переводятся GPT.
 - Первая поставка начинается в allowlist beta; KZ locale содержит редактируемые пользователем TODO с RU fallback.
-- Пользователь просит следующим шагом начать реализацию согласно существующим документам.
+- Взаимоисключение `subscribe_all` и категорий закреплено составным FK в PostgreSQL; переключение должно выполняться одной транзакцией.
+- Физические очереди classification, notification delivery/outbox и broadcast созданы на этапе схемы, но их сервисная логика относится к последующим этапам.
 
 ## Relevant files
 
 - `docs/specs/terricon-events-bot.md` — утверждённая спецификация.
 - `docs/plans/terricon-events-bot-v1.md` — утверждённый технический план и порядок этапов.
-- `.env` — пользовательская конфигурация с `BASE_URL`; не раскрывать и не перезаписывать.
+- `src/terricon_events_bot/infrastructure/models/` — SQLAlchemy-схема.
+- `alembic/versions/` — пять миграций этапа 2.
+- `tests/integration/test_postgres_schema.py` — opt-in PostgreSQL-проверки.
+- `.env` — пользовательская конфигурация; не раскрывать и не перезаписывать.
 
 ## Repository state
 
 - Корень проекта: `/home/dev/workspace/projects/terriconparser`.
-- Директория не является Git-репозиторием; ветка, коммиты и Git status отсутствуют.
-- Файлы проекта на момент handoff: `.env`, спецификация, технический план и этот handoff.
+- Git-репозиторий находится на ветке `main`, remote `origin` указывает на `git@github.com:DieLoves/TerriconEventsBot.git`.
+- Этап 1 сохранён коммитом `2720fb1` и отправлен в `origin/main`.
 - On-disk `AGENTS.md` в проекте или его родительских каталогах не найден; применялись пользовательские инструкции текущей сессии.
 
 ## Validation
 
-- Спецификация и план повторно прочитаны; их наличие и SHA-256 проверены.
-- В ходе сессии live API возвращал по одной локали 130 IT, 52 business и 21 marketing запись; ID совпадали между RU/KZ. У проверенных 203 RU-записей были заполнены ID, название, дата, ссылка, постер и адрес.
-- Официальная документация OpenAI проверена: `gpt-5.6-luna` поддерживает Responses API и Structured Outputs.
-- Инструменты окружения проверены: системный Python 3.12.3, `uv 0.12.13`; Docker Compose и `psql` отсутствуют.
-- Тесты, линтеры, сборка, миграции и запуск приложения не выполнялись, поскольку реализации ещё нет.
+- Python 3.13.15 установлен через uv; локальный gate выполняется в `.venv`.
+- Этап 2: 36 unit-тестов проходят; четыре PostgreSQL integration-теста корректно пропускаются без `TEST_DATABASE_URL`.
+- `ruff check`, `ruff format --check`, `mypy` и `alembic heads` проходят.
+- Alembic upgrade `base → 0005_operations` и downgrade `0005_operations → base` успешно скомпилированы в offline PostgreSQL SQL.
+- Docker CLI/Compose установлен, но текущая среда запрещает доступ к `/var/run/docker.sock`, поэтому живой PostgreSQL integration gate ещё не выполнен.
 
 ## Known issues / blockers
 
-- Для полного выполнения плана нужен Python 3.13 через uv.
-- Docker/PostgreSQL отсутствуют в текущем окружении; это блокирует будущие Compose и PostgreSQL integration checks, но не начальный scaffold и unit tests.
-- Telegram и OpenAI credentials ещё не добавлены; не запрашивать и не сохранять их вне `.env`.
+- Нужен доступный PostgreSQL либо `TEST_DATABASE_URL`, чтобы выполнить четыре integration-теста и `alembic check` против живой схемы. SQLite fallback не создавать.
+- Docker daemon текущему процессу недоступен, несмотря на наличие Docker CLI.
+- Не раскрывать и не сохранять credentials вне `.env`.
 - Перед публичным KZ-релизом пользователь должен заполнить и проверить статические KZ-строки.
 
 ## Remaining work
 
-- Выполнить все этапы `docs/plans/terricon-events-bot-v1.md` по порядку.
-- По завершении каждого этапа запускать соответствующие проверки и не заявлять о Docker/PostgreSQL validation, пока среда не подготовлена.
+- Выполнить этапы 3–8 `docs/plans/terricon-events-bot-v1.md` по порядку.
+- При появлении PostgreSQL запустить `TEST_DATABASE_URL=... uv run pytest -m postgres` и не заявлять о live migration validation до этого.
 - После полной реализации и приёмки пометить технический план завершённым.
 
 ## Next recommended step
 
-Прочитать спецификацию и план, затем начать этап 1 плана: сначала защитить существующий `.env` через `.gitignore`, инициализировать Python 3.13/uv-проект и добавить минимальный типизированный configuration/composition-root scaffold с unit tests, не переходя к функционалу следующих этапов до прохождения локального quality gate.
+После прямого указания пользователя начать этап 3: DTO фактического Terricon API, HTTP client/retry policy, нормализация, транзакционный sync/baseline/missing streak/hash/diff и read-only smoke-команда. Не переходить к OpenAI-адаптеру этапа 4 до отдельного подтверждения.
