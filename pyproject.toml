@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "terricon-events-bot"
+version = "0.1.0"
+description = "Unofficial Telegram bot for Terricon Valley events"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "aiogram>=3.0,<4",
+    "alembic>=1.13,<2",
+    "apscheduler>=3.10,<4",
+    "asyncpg>=0.29,<1",
+    "httpx>=0.27,<1",
+    "openai>=1.0,<3",
+    "pydantic-settings>=2.0,<3",
+    "pyyaml>=6.0,<7",
+    "sqlalchemy[asyncio]>=2.0,<3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11,<2",
+    "pytest>=8.3,<10",
+    "pytest-asyncio>=0.24,<2",
+    "ruff>=0.8,<1",
+    "types-pyyaml>=6.0,<7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/terricon_events_bot"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "ASYNC", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["terricon_events_bot"]
