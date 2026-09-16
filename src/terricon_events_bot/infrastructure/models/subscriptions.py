@@ -48,7 +48,6 @@ class SubscriptionCategory(Base):
             name="fk_subscription_categories_settings_mode",
         ),
         CheckConstraint("subscribe_all = false", name="requires_category_mode"),
-        UniqueConstraint("user_id", "category"),
         Index("ix_subscription_categories_category_user_id", "category", "user_id"),
     )
 

@@ -51,22 +51,20 @@
 ## Validation
 
 - Python 3.13.15 установлен через uv; локальный gate выполняется в `.venv`.
-- Этап 2: 36 unit-тестов проходят; четыре PostgreSQL integration-теста корректно пропускаются без `TEST_DATABASE_URL`.
+- Этап 2: 36 unit-тестов и четыре живых PostgreSQL 17 integration-теста проходят.
 - `ruff check`, `ruff format --check`, `mypy` и `alembic heads` проходят.
 - Alembic upgrade `base → 0005_operations` и downgrade `0005_operations → base` успешно скомпилированы в offline PostgreSQL SQL.
-- Docker CLI/Compose установлен, но текущая среда запрещает доступ к `/var/run/docker.sock`, поэтому живой PostgreSQL integration gate ещё не выполнен.
+- Живой migration gate проверяет upgrade/downgrade, отсутствие Alembic schema drift, взаимоисключение режимов подписки и уникальность локализаций, категорий и delivery.
 
 ## Known issues / blockers
 
-- Нужен доступный PostgreSQL либо `TEST_DATABASE_URL`, чтобы выполнить четыре integration-теста и `alembic check` против живой схемы. SQLite fallback не создавать.
-- Docker daemon текущему процессу недоступен, несмотря на наличие Docker CLI.
 - Не раскрывать и не сохранять credentials вне `.env`.
 - Перед публичным KZ-релизом пользователь должен заполнить и проверить статические KZ-строки.
 
 ## Remaining work
 
 - Выполнить этапы 3–8 `docs/plans/terricon-events-bot-v1.md` по порядку.
-- При появлении PostgreSQL запустить `TEST_DATABASE_URL=... uv run pytest -m postgres` и не заявлять о live migration validation до этого.
+- При изменении схемы повторять `TEST_DATABASE_URL=... uv run pytest -m postgres` против чистого PostgreSQL.
 - После полной реализации и приёмки пометить технический план завершённым.
 
 ## Next recommended step

@@ -122,7 +122,6 @@ def upgrade() -> None:
             name="fk_fsm_states_user_id_users",
         ),
         sa.PrimaryKeyConstraint("user_id", "scope", name="pk_fsm_states"),
-        sa.UniqueConstraint("user_id", "scope", name="uq_fsm_states_user_id_scope"),
     )
 
     op.create_table(
@@ -182,11 +181,6 @@ def upgrade() -> None:
             name="fk_broadcast_localizations_broadcast_id_broadcasts",
         ),
         sa.PrimaryKeyConstraint("broadcast_id", "locale", name="pk_broadcast_localizations"),
-        sa.UniqueConstraint(
-            "broadcast_id",
-            "locale",
-            name="uq_broadcast_localizations_broadcast_id_locale",
-        ),
     )
 
     op.create_table(

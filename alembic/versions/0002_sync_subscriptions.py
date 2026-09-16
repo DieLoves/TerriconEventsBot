@@ -198,9 +198,6 @@ def upgrade() -> None:
             name="fk_subscription_categories_settings_mode",
         ),
         sa.PrimaryKeyConstraint("user_id", "category", name="pk_subscription_categories"),
-        sa.UniqueConstraint(
-            "user_id", "category", name="uq_subscription_categories_user_id_category"
-        ),
     )
     op.create_index(
         "ix_subscription_categories_category_user_id",

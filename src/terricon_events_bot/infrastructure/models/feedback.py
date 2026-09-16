@@ -12,7 +12,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
     func,
     text,
 )
@@ -83,7 +82,6 @@ class FeedbackMessage(Base):
 
 class FsmState(Base):
     __tablename__ = "fsm_states"
-    __table_args__ = (UniqueConstraint("user_id", "scope"),)
 
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True

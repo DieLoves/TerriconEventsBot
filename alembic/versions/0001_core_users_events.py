@@ -71,7 +71,7 @@ def upgrade() -> None:
     op.create_table(
         "users",
         sa.Column("id", sa.BigInteger(), sa.Identity(), nullable=False),
-        sa.Column("telegram_id", sa.BigInteger(), autoincrement=False, nullable=False),
+        sa.Column("telegram_id", sa.BigInteger(), nullable=False),
         sa.Column("username", sa.String(64)),
         sa.Column("display_name", sa.String(255)),
         sa.Column("locale", db_enum("locale", "ru", "kz"), server_default="ru", nullable=False),
@@ -104,7 +104,7 @@ def upgrade() -> None:
 
     op.create_table(
         "beta_allowlist",
-        sa.Column("telegram_id", sa.BigInteger(), nullable=False),
+        sa.Column("telegram_id", sa.BigInteger(), autoincrement=False, nullable=False),
         sa.Column("added_by_telegram_id", sa.BigInteger()),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
@@ -208,7 +208,6 @@ def upgrade() -> None:
             name="fk_event_localizations_event_id_events",
         ),
         sa.PrimaryKeyConstraint("event_id", "locale", name="pk_event_localizations"),
-        sa.UniqueConstraint("event_id", "locale", name="uq_event_localizations_event_id_locale"),
     )
     op.create_index("ix_event_localizations_locale", "event_localizations", ["locale"])
 
@@ -241,7 +240,6 @@ def upgrade() -> None:
             name="fk_event_categories_event_id_events",
         ),
         sa.PrimaryKeyConstraint("event_id", "category", name="pk_event_categories"),
-        sa.UniqueConstraint("event_id", "category", name="uq_event_categories_event_id_category"),
     )
     op.create_index(
         "ix_event_categories_category_event_id", "event_categories", ["category", "event_id"]

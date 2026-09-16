@@ -16,7 +16,6 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    UniqueConstraint,
     func,
     text,
 )
@@ -153,10 +152,7 @@ class Event(Base):
 
 class EventLocalization(Base):
     __tablename__ = "event_localizations"
-    __table_args__ = (
-        UniqueConstraint("event_id", "locale"),
-        Index("ix_event_localizations_locale", "locale"),
-    )
+    __table_args__ = (Index("ix_event_localizations_locale", "locale"),)
 
     event_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True
@@ -185,10 +181,7 @@ class EventLocalization(Base):
 
 class EventCategory(Base):
     __tablename__ = "event_categories"
-    __table_args__ = (
-        UniqueConstraint("event_id", "category"),
-        Index("ix_event_categories_category_event_id", "category", "event_id"),
-    )
+    __table_args__ = (Index("ix_event_categories_category_event_id", "category", "event_id"),)
 
     event_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True

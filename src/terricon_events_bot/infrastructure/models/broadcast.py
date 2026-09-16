@@ -71,7 +71,6 @@ class Broadcast(Base):
 
 class BroadcastLocalization(Base):
     __tablename__ = "broadcast_localizations"
-    __table_args__ = (UniqueConstraint("broadcast_id", "locale"),)
 
     broadcast_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("broadcasts.id", ondelete="CASCADE"), primary_key=True
