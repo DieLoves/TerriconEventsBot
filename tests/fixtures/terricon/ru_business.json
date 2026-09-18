@@ -1,0 +1,29 @@
+[
+  {
+    "id": 201,
+    "uid": "fixture-business",
+    "type": "business",
+    "type_text": {"ru": "Бизнес", "kz": "Бизнес"},
+    "card_type": "default",
+    "url": "https://events.example/ru/business/fixture-business",
+    "eventType": "edu",
+    "address": "Business Hall",
+    "shortDesc": "Synthetic short description",
+    "card_info": {
+      "name": "Synthetic business event",
+      "complete_url": "https://recordings.example/business",
+      "language": ["русский"],
+      "description": "Synthetic description",
+      "url_live": "https://recordings.example/business",
+      "to_whom": "Founders",
+      "date_start": {"unix": 1704103200, "iso": "2024-01-01T10:00:00Z", "text": "1 января, 15:00"}
+    },
+    "leads_info": {
+      "url_photo": "https://images.example/business.jpg",
+      "format": {"id": "offline", "formated": "офлайн"},
+      "tags": ["business"],
+      "status": "end_mitap"
+    },
+    "contact": {"first_name": "", "last_name": "", "full_name": "", "role": ""}
+  }
+]

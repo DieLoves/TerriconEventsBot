@@ -1,0 +1,38 @@
+[
+  {
+    "id": 101,
+    "uid": "fixture-it",
+    "type": "it",
+    "type_text": {"ru": "IT", "kz": "IT"},
+    "card_type": "default",
+    "url": "https://events.example/ru/it/fixture-it",
+    "eventType": "lecture",
+    "address": "Fixture Hall",
+    "shortDesc": "Synthetic short description",
+    "card_info": {
+      "name": "Synthetic IT event",
+      "complete_url": "https://registration.example/it",
+      "language": ["қазақша", "русский"],
+      "description": "Synthetic description",
+      "url_live": "https://registration.example/it",
+      "to_whom": "Developers",
+      "date_start": {
+        "unix": 1893492000,
+        "iso": "2030-01-01T10:00:00Z",
+        "text": "1 января, 15:00"
+      }
+    },
+    "leads_info": {
+      "url_photo": "https://images.example/it.jpg",
+      "format": {"id": "online_and_offline", "formated": "офлайн и онлайн"},
+      "tags": ["it"],
+      "status": "new_mitap"
+    },
+    "contact": {
+      "first_name": "Test",
+      "last_name": "Speaker",
+      "full_name": "Test Speaker",
+      "role": "Speaker"
+    }
+  }
+]

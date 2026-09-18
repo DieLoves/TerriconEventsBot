@@ -1,0 +1,29 @@
+[
+  {
+    "id": 301,
+    "uid": "fixture-marketing",
+    "type": "marketing",
+    "type_text": {"ru": "Маркетинг", "kz": "Маркетинг"},
+    "card_type": "default",
+    "url": "https://events.example/kz/marketing/fixture-marketing",
+    "eventType": "mitup",
+    "address": "",
+    "shortDesc": "Синтетикалық қысқаша сипаттама",
+    "card_info": {
+      "name": "Синтетикалық маркетинг іс-шарасы",
+      "complete_url": "https://registration.example/marketing",
+      "language": ["english"],
+      "description": "Синтетикалық сипаттама",
+      "url_live": "https://registration.example/marketing",
+      "to_whom": "Маркетологтар",
+      "date_start": {"unix": 1893578400, "iso": "2030-01-02T10:00:00Z", "text": "2 қаңтар, 15:00"}
+    },
+    "leads_info": {
+      "url_photo": "https://images.example/marketing.jpg",
+      "format": {"id": "online", "formated": "онлайн"},
+      "tags": ["marketing"],
+      "status": "new_mitap"
+    },
+    "contact": {"first_name": "Test", "last_name": "Expert", "full_name": "", "role": "Expert"}
+  }
+]

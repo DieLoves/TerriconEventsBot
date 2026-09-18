@@ -81,11 +81,20 @@ def test_alembic_history_is_linear_and_has_expected_head() -> None:
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
     revisions = list(scripts.walk_revisions(base="base", head="heads"))
 
-    assert scripts.get_heads() == ["0005_operations"]
+    assert scripts.get_heads() == ["0006_localized_details_url"]
     assert [revision.revision for revision in reversed(revisions)] == [
         "0001_core",
         "0002_sync_subscriptions",
         "0003_notification_delivery",
         "0004_feedback_broadcasts",
         "0005_operations",
+        "0006_localized_details_url",
     ]
+
+
+def test_details_url_belongs_to_event_localization() -> None:
+    events = Base.metadata.tables["events"]
+    localizations = Base.metadata.tables["event_localizations"]
+
+    assert "details_url" not in events.c
+    assert "details_url" in localizations.c

@@ -20,6 +20,9 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0,<3",
 ]
 
+[project.scripts]
+terricon-api-smoke = "terricon_events_bot.infrastructure.terricon.smoke:main"
+
 [dependency-groups]
 dev = [
     "mypy>=1.11,<2",

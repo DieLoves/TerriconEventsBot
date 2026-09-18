@@ -119,7 +119,6 @@ class Event(Base):
     address: Mapped[str | None] = mapped_column(Text)
     registration_url: Mapped[str | None] = mapped_column(Text)
     recording_url: Mapped[str | None] = mapped_column(Text)
-    details_url: Mapped[str | None] = mapped_column(Text)
     poster_url: Mapped[str | None] = mapped_column(Text)
     state: Mapped[EventState] = mapped_column(
         enum_type(EventState, "event_state"),
@@ -162,6 +161,7 @@ class EventLocalization(Base):
     description: Mapped[str | None] = mapped_column(Text)
     audience: Mapped[str | None] = mapped_column(Text)
     speaker: Mapped[str | None] = mapped_column(Text)
+    details_url: Mapped[str | None] = mapped_column(Text)
     translation_source: Mapped[TranslationSource] = mapped_column(
         enum_type(TranslationSource, "translation_source"),
         nullable=False,

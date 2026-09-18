@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
 from alembic import command
-from alembic.config import Config
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from terricon_events_bot.domain.enums import EventFormat, EventState, SourceTheme
 from terricon_events_bot.infrastructure import models
 from terricon_events_bot.infrastructure.database import Base
+from terricon_events_bot.infrastructure.models import Event
 
 _ = models
 
@@ -41,8 +44,10 @@ async def test_migrations_create_all_tables_and_critical_indexes(
         await engine.dispose()
 
 
-def test_migrated_schema_matches_sqlalchemy_metadata(migrated_database_url: str) -> None:
-    command.check(Config("alembic.ini"))
+def test_migrated_schema_matches_sqlalchemy_metadata(
+    alembic_runner: Callable[..., None],
+) -> None:
+    alembic_runner(command.check)
 
 
 @pytest.mark.asyncio
@@ -179,5 +184,93 @@ async def test_localization_category_and_delivery_uniqueness(
                 with pytest.raises(IntegrityError):
                     await connection.execute(text(statement), parameters)
                 await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_localized_details_url_migration_preserves_existing_value(
+    migrated_database_url: str,
+    alembic_runner: Callable[..., None],
+) -> None:
+    await asyncio.to_thread(alembic_runner, command.downgrade, "0005_operations")
+
+    engine = create_async_engine(migrated_database_url)
+    try:
+        async with engine.begin() as connection:
+            event_id = await connection.scalar(
+                text(
+                    "INSERT INTO events (source_id, source_theme, starts_at, details_url) "
+                    "VALUES (2000006, 'it', :starts_at, 'https://example.test/event') "
+                    "RETURNING id"
+                ),
+                {"starts_at": datetime.now(UTC)},
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO event_localizations (event_id, locale, title, content_hash) "
+                    "VALUES (:event_id, 'ru', 'RU', 'ru-hash'), "
+                    "(:event_id, 'kz', 'KZ', 'kz-hash')"
+                ),
+                {"event_id": event_id},
+            )
+    finally:
+        await engine.dispose()
+
+    try:
+        await asyncio.to_thread(alembic_runner, command.upgrade, "head")
+        engine = create_async_engine(migrated_database_url)
+        try:
+            async with engine.connect() as connection:
+                event_columns = await connection.run_sync(
+                    lambda sync: {item["name"] for item in inspect(sync).get_columns("events")}
+                )
+                localization_columns = await connection.run_sync(
+                    lambda sync: {
+                        item["name"] for item in inspect(sync).get_columns("event_localizations")
+                    }
+                )
+                rows = await connection.execute(
+                    text(
+                        "SELECT locale::text, details_url FROM event_localizations "
+                        "WHERE event_id = :event_id"
+                    ),
+                    {"event_id": event_id},
+                )
+
+            assert "details_url" not in event_columns
+            assert "details_url" in localization_columns
+            assert dict(rows.all()) == {
+                "ru": "https://example.test/event",
+                "kz": "https://example.test/event",
+            }
+        finally:
+            await engine.dispose()
+    finally:
+        await asyncio.to_thread(alembic_runner, command.upgrade, "head")
+
+
+@pytest.mark.asyncio
+async def test_postgresql_enums_round_trip_as_domain_enum_members(
+    migrated_database_url: str,
+) -> None:
+    engine = create_async_engine(migrated_database_url)
+    try:
+        async with engine.begin() as connection:
+            event_id = await connection.scalar(
+                text(
+                    "INSERT INTO events (source_id, source_theme, starts_at, event_format, state) "
+                    "VALUES (2000007, 'marketing', :starts_at, 'hybrid', 'active') RETURNING id"
+                ),
+                {"starts_at": datetime.now(UTC)},
+            )
+        async_session = async_sessionmaker(engine, expire_on_commit=False)
+        async with async_session() as session:
+            event = await session.get(Event, event_id)
+
+        assert event is not None
+        assert event.source_theme is SourceTheme.MARKETING
+        assert event.event_format is EventFormat.HYBRID
+        assert event.state is EventState.ACTIVE
     finally:
         await engine.dispose()
