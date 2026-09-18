@@ -19,3 +19,11 @@ uv run pytest
 ```
 
 Секреты хранятся только в `.env`, который исключён из Git.
+
+Read-only проверка всех шести тематических endpoint Terricon API:
+
+```bash
+uv run terricon-api-smoke
+```
+
+Команда использует только `BASE_URL`, не подключается к PostgreSQL и не изменяет данные.
