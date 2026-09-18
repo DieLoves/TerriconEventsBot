@@ -44,7 +44,7 @@ class OpenAIUsage(Base):
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 9), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

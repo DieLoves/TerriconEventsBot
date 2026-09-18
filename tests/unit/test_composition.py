@@ -4,6 +4,7 @@ import pytest
 
 from terricon_events_bot.composition import build_foundation
 from terricon_events_bot.config import Settings
+from terricon_events_bot.infrastructure.openai_adapter import OpenAIEventAdapter
 from terricon_events_bot.infrastructure.terricon import TerriconClient
 from terricon_events_bot.localization import LocalizationError
 
@@ -42,9 +43,13 @@ async def test_foundation_wires_and_closes_terricon_import_services() -> None:
     foundation = build_foundation(settings, PROJECT_ROOT)
     try:
         assert isinstance(foundation.terricon_client, TerriconClient)
+        assert isinstance(foundation.openai_adapter, OpenAIEventAdapter)
         assert foundation.sync_service is not None
+        assert foundation.classification_worker is not None
         assert not foundation.http_client.is_closed
+        assert not foundation.openai_client.is_closed()
     finally:
         await foundation.close()
 
     assert foundation.http_client.is_closed
+    assert foundation.openai_client.is_closed()

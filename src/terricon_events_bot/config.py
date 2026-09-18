@@ -46,9 +46,36 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "BOT_TOKEN"),
     )
     openai_api_key: SecretStr = Field(min_length=1, validation_alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-5.6-luna", min_length=1, validation_alias="OPENAI_MODEL")
+    openai_model: str = Field(
+        default="gpt-5.6-luna",
+        min_length=1,
+        max_length=128,
+        validation_alias="OPENAI_MODEL",
+    )
     openai_monthly_budget_usd: Decimal = Field(
-        default=Decimal("5"), ge=0, validation_alias="OPENAI_MONTHLY_BUDGET_USD"
+        default=Decimal("5"),
+        ge=0,
+        allow_inf_nan=False,
+        validation_alias="OPENAI_MONTHLY_BUDGET_USD",
+    )
+    openai_input_price_per_million_usd: Decimal = Field(
+        default=Decimal("0.20"),
+        ge=0,
+        allow_inf_nan=False,
+        validation_alias="OPENAI_INPUT_PRICE_PER_MILLION_USD",
+    )
+    openai_output_price_per_million_usd: Decimal = Field(
+        default=Decimal("1.20"),
+        ge=0,
+        allow_inf_nan=False,
+        validation_alias="OPENAI_OUTPUT_PRICE_PER_MILLION_USD",
+    )
+    openai_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+        allow_inf_nan=False,
+        validation_alias="OPENAI_TIMEOUT_SECONDS",
     )
     database_url: SecretStr = Field(min_length=1, validation_alias="DATABASE_URL")
     admin_telegram_ids: TelegramIds = Field(repr=False, validation_alias="ADMIN_TELEGRAM_IDS")
@@ -73,6 +100,11 @@ class Settings(BaseSettings):
     @classmethod
     def parse_telegram_ids(cls, value: Any) -> Any:
         return _parse_telegram_ids(value)
+
+    @field_validator("openai_model", mode="before")
+    @classmethod
+    def normalize_openai_model(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("admin_telegram_ids", "allowed_telegram_ids")
     @classmethod

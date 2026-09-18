@@ -56,6 +56,8 @@
 
 ### Этап 4 — OpenAI-адаптер
 
+Статус: завершён 2026-09-18.
+
 - Использовать `AsyncOpenAI` и Responses API с `store=False`, `reasoning.effort=low` и строгим `json_schema`; дополнительно валидировать ответ Pydantic-моделью. GPT‑5.6 Luna официально поддерживает Responses и Structured Outputs. [OpenAI Docs](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
 - Реализовать отдельные операции `classify_event` и `translate_missing_locale`; статические интерфейсные тексты и admin-рассылки через этот адаптер не пропускать.
 - В классификаторе проверять количество меток и исключительность `other`; сохранять prompt version, модель, usage и время выполнения.

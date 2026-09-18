@@ -81,7 +81,7 @@ def test_alembic_history_is_linear_and_has_expected_head() -> None:
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
     revisions = list(scripts.walk_revisions(base="base", head="heads"))
 
-    assert scripts.get_heads() == ["0006_localized_details_url"]
+    assert scripts.get_heads() == ["0007_openai_cost_precision"]
     assert [revision.revision for revision in reversed(revisions)] == [
         "0001_core",
         "0002_sync_subscriptions",
@@ -89,6 +89,7 @@ def test_alembic_history_is_linear_and_has_expected_head() -> None:
         "0004_feedback_broadcasts",
         "0005_operations",
         "0006_localized_details_url",
+        "0007_openai_cost_precision",
     ]
 
 

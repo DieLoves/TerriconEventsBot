@@ -224,7 +224,7 @@ class EventClassification(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     cost_usd: Mapped[Decimal] = mapped_column(
-        Numeric(12, 6), nullable=False, default=Decimal("0"), server_default="0"
+        Numeric(18, 9), nullable=False, default=Decimal("0"), server_default="0"
     )
     first_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

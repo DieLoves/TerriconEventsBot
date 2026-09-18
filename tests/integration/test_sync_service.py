@@ -12,12 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from terricon_events_bot.application.sync import SyncService
 from terricon_events_bot.domain.enums import (
+    CategorySlug,
+    ClassificationStatus,
     EventState,
     Locale,
     NotificationType,
     SourceTheme,
     SyncRunStatus,
     SyncTrigger,
+    TranslationSource,
 )
 from terricon_events_bot.domain.events import SourceEvent
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
@@ -25,6 +28,8 @@ from terricon_events_bot.infrastructure.models import (
     AdminAlert,
     DomainChange,
     Event,
+    EventCategory,
+    EventClassification,
     EventLocalization,
     SyncRun,
     SyncState,
@@ -152,6 +157,7 @@ async def test_full_baseline_is_idempotent_and_creates_no_domain_changes(
             select(func.count()).select_from(EventLocalization)
         )
         change_count = await session.scalar(select(func.count()).select_from(DomainChange))
+        classifications = (await session.scalars(select(EventClassification))).all()
         revisions = (await session.scalars(select(Event.revision))).all()
         state = await session.get(SyncState, 1)
 
@@ -163,6 +169,8 @@ async def test_full_baseline_is_idempotent_and_creates_no_domain_changes(
     assert event_count == 3
     assert localization_count == 6
     assert change_count == 0
+    assert len(classifications) == 3
+    assert all(item.status is ClassificationStatus.PENDING for item in classifications)
     assert revisions == [1, 1, 1]
     assert state is not None and state.baseline_completed_at is not None
 
@@ -223,11 +231,12 @@ async def test_post_baseline_new_and_important_changes_are_idempotent(
     assert changed_result.updated_events == 1
     assert repeated.updated_events == 0
     assert event is not None and event.revision == 2
-    assert [change.notification_type for change in changes] == [
-        NotificationType.NEW_EVENT,
-        NotificationType.IMPORTANT_CHANGE,
-    ]
-    assert set(changes[1].change_data) == {"starts_at", "titles"}
+    assert changes == []
+    async with session_factory() as session:
+        classification = await session.get(EventClassification, event.id)
+    assert classification is not None
+    assert classification.status is ClassificationStatus.PENDING
+    assert classification.result_metadata["notify_new"] is True
 
 
 @pytest.mark.asyncio
@@ -520,3 +529,240 @@ async def test_database_rollback_leaves_a_failed_sync_run_audit(
     assert runs[0].finished_at is not None
     assert event_count == 0
     assert state is None
+
+
+@pytest.mark.asyncio
+async def test_official_localization_replaces_machine_without_spurious_reclassification(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads())
+    service = SyncService(session_factory, source, clock=MutableClock())
+    await service.run(SyncTrigger.STARTUP)
+
+    async with session_factory() as session:
+        async with session.begin():
+            event = await session.scalar(select(Event).where(Event.source_id == 101))
+            assert event is not None
+            classification = await session.get(EventClassification, event.id)
+            localization = await session.get(EventLocalization, (event.id, Locale.KZ))
+            assert classification is not None and localization is not None
+            classification.status = ClassificationStatus.COMPLETED
+            classification.next_attempt_at = None
+            localization.title = "Machine title"
+            localization.translation_source = TranslationSource.MACHINE
+
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        event = await session.scalar(select(Event).where(Event.source_id == 101))
+        assert event is not None
+        classification = await session.get(EventClassification, event.id)
+        localization = await session.get(EventLocalization, (event.id, Locale.KZ))
+
+    assert classification is not None
+    assert classification.status is ClassificationStatus.COMPLETED
+    assert localization is not None
+    assert localization.translation_source is TranslationSource.OFFICIAL
+    assert localization.title == source_event(Locale.KZ, SourceTheme.IT).localization.title
+
+
+@pytest.mark.asyncio
+async def test_only_semantic_changes_requeue_completed_classification(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads())
+    service = SyncService(session_factory, source, clock=MutableClock())
+    await service.run(SyncTrigger.STARTUP)
+
+    async with session_factory() as session:
+        async with session.begin():
+            event = await session.scalar(select(Event).where(Event.source_id == 101))
+            assert event is not None
+            classification = await session.get(EventClassification, event.id)
+            assert classification is not None
+            classification.status = ClassificationStatus.COMPLETED
+            classification.classified_at = datetime(2030, 1, 10, tzinfo=UTC)
+            classification.next_attempt_at = None
+            original_hash = classification.semantic_hash
+
+    for locale in Locale:
+        original = source.payloads[(locale, SourceTheme.IT)].events[0]
+        replace_payload_events(
+            source,
+            locale,
+            SourceTheme.IT,
+            (replace(original, starts_at=original.starts_at + timedelta(days=1)),),
+        )
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        event = await session.scalar(select(Event).where(Event.source_id == 101))
+        assert event is not None
+        classification = await session.get(EventClassification, event.id)
+    assert classification is not None
+    assert classification.status is ClassificationStatus.COMPLETED
+    assert classification.semantic_hash == original_hash
+
+    for locale in Locale:
+        dated = source.payloads[(locale, SourceTheme.IT)].events[0]
+        localization = replace(
+            dated.localization,
+            title=f"{dated.localization.title} changed",
+            content_hash=("e" if locale is Locale.RU else "f") * 64,
+        )
+        replace_payload_events(
+            source,
+            locale,
+            SourceTheme.IT,
+            (replace(dated, localization=localization),),
+        )
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        classification = await session.get(EventClassification, event.id)
+    assert classification is not None
+    assert classification.status is ClassificationStatus.PENDING
+    assert classification.semantic_hash != original_hash
+    assert classification.result_metadata["notify_new"] is False
+
+
+@pytest.mark.asyncio
+async def test_semantic_change_removes_stale_machine_localization(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    payloads = full_payloads()
+    source = FakeSource(payloads)
+    replace_payload_events(source, Locale.KZ, SourceTheme.IT, ())
+    service = SyncService(session_factory, source, clock=MutableClock())
+    await service.run(SyncTrigger.STARTUP)
+
+    async with session_factory() as session:
+        async with session.begin():
+            event = await session.scalar(select(Event).where(Event.source_id == 101))
+            assert event is not None
+            classification = await session.get(EventClassification, event.id)
+            assert classification is not None
+            classification.status = ClassificationStatus.COMPLETED
+            classification.next_attempt_at = None
+            session.add(
+                EventLocalization(
+                    event_id=event.id,
+                    locale=Locale.KZ,
+                    title="Old machine title",
+                    description="Old machine description",
+                    translation_source=TranslationSource.MACHINE,
+                    content_hash="f" * 64,
+                )
+            )
+
+    unchanged = await service.run(SyncTrigger.SCHEDULED)
+    async with session_factory() as session:
+        event = await session.scalar(select(Event).where(Event.source_id == 101))
+        assert event is not None
+        unchanged_revision = event.revision
+        change_count = await session.scalar(
+            select(func.count()).select_from(DomainChange).where(DomainChange.event_id == event.id)
+        )
+
+    assert unchanged.updated_events == 0
+    assert unchanged_revision == 1
+    assert change_count == 0
+
+    original = source.payloads[(Locale.RU, SourceTheme.IT)].events[0]
+    changed_localization = replace(
+        original.localization,
+        title=f"{original.localization.title} changed",
+        content_hash="e" * 64,
+    )
+    replace_payload_events(
+        source,
+        Locale.RU,
+        SourceTheme.IT,
+        (replace(original, localization=changed_localization),),
+    )
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        event = await session.scalar(select(Event).where(Event.source_id == 101))
+        assert event is not None
+        classification = await session.get(EventClassification, event.id)
+        machine = await session.get(EventLocalization, (event.id, Locale.KZ))
+
+    assert machine is None
+    assert classification is not None
+    assert classification.status is ClassificationStatus.PENDING
+    assert classification.result_metadata["queued_revision"] == event.revision
+
+
+@pytest.mark.asyncio
+async def test_unannounced_event_suppresses_changes_until_active_again(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads())
+    service = SyncService(session_factory, source, clock=MutableClock())
+    await service.run(SyncTrigger.STARTUP)
+
+    added_by_locale: dict[Locale, SourceEvent] = {}
+    for locale in Locale:
+        original = source.payloads[(locale, SourceTheme.IT)].events[0]
+        added = replace(
+            original,
+            source_id=103,
+            localization=replace(
+                original.localization,
+                title=f"{original.localization.title} new",
+                content_hash=("1" if locale is Locale.RU else "2") * 64,
+            ),
+        )
+        added_by_locale[locale] = added
+        replace_payload_events(source, locale, SourceTheme.IT, (original, added))
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        async with session.begin():
+            event = await session.scalar(select(Event).where(Event.source_id == 103))
+            assert event is not None
+            classification = await session.get(EventClassification, event.id)
+            assert classification is not None
+            classification.status = ClassificationStatus.COMPLETED
+            classification.classified_at = datetime(2030, 1, 10, tzinfo=UTC)
+            classification.next_attempt_at = None
+            session.add(EventCategory(event_id=event.id, category=CategorySlug.DEVELOPMENT_IT))
+
+    for locale in Locale:
+        original = source.payloads[(locale, SourceTheme.IT)].events[0]
+        replace_payload_events(source, locale, SourceTheme.IT, (original,))
+    await service.run(SyncTrigger.SCHEDULED)
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        hidden = await session.scalar(select(Event).where(Event.source_id == 103))
+        assert hidden is not None
+        hidden_changes = (
+            await session.scalars(select(DomainChange).where(DomainChange.event_id == hidden.id))
+        ).all()
+    assert not hidden.is_available
+    assert hidden_changes == []
+
+    for locale in Locale:
+        original = source.payloads[(locale, SourceTheme.IT)].events[0]
+        replace_payload_events(source, locale, SourceTheme.IT, (original, added_by_locale[locale]))
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        restored = await session.scalar(select(Event).where(Event.source_id == 103))
+        assert restored is not None
+        classification = await session.get(EventClassification, restored.id)
+        changes = (
+            await session.scalars(select(DomainChange).where(DomainChange.event_id == restored.id))
+        ).all()
+
+    assert restored.is_available
+    assert classification is not None
+    assert classification.result_metadata["notify_new"] is False
+    assert [change.notification_type for change in changes] == [NotificationType.NEW_EVENT]
+    assert changes[0].new_categories == ["development_it"]

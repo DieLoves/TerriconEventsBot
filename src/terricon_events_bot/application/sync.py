@@ -6,12 +6,14 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Protocol
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from terricon_events_bot.domain.enums import (
+    ClassificationStatus,
     EventState,
     Locale,
     NotificationType,
@@ -22,6 +24,7 @@ from terricon_events_bot.domain.enums import (
     TranslationSource,
 )
 from terricon_events_bot.domain.event_changes import (
+    canonical_hash,
     important_hash,
     semantic_hash,
     structured_diff,
@@ -32,6 +35,7 @@ from terricon_events_bot.infrastructure.models import (
     DomainChange,
     Event,
     EventCategory,
+    EventClassification,
     EventLocalization,
     SyncEndpointState,
     SyncRun,
@@ -511,6 +515,7 @@ class SyncService:
         for row in localization_rows:
             localizations[row.event_id][row.locale] = row
         categories: dict[int, list[str]] = defaultdict(list)
+        classifications: dict[int, EventClassification] = {}
         if event_ids:
             category_rows = (
                 await session.execute(
@@ -521,6 +526,16 @@ class SyncService:
             ).all()
             for event_id, category in category_rows:
                 categories[event_id].append(category.value)
+            classifications = {
+                classification.event_id: classification
+                for classification in (
+                    await session.scalars(
+                        select(EventClassification).where(
+                            EventClassification.event_id.in_(event_ids)
+                        )
+                    )
+                ).all()
+            }
 
         created = len(new_source_ids)
         updated_events = 0
@@ -528,7 +543,7 @@ class SyncService:
         for source_id, incoming in merged.items():
             event = events_by_source[source_id]
             is_new = source_id in new_source_ids
-            old_localization_data = self._localization_data(localizations[event.id])
+            old_localization_data = self._official_localization_data(localizations[event.id])
             old_important = self._important_snapshot(event, old_localization_data)
             material_changed = False
 
@@ -580,8 +595,40 @@ class SyncService:
                     localization.translation_source = TranslationSource.OFFICIAL
                     localization.content_hash = source_localization.content_hash
 
-            new_localization_data = self._localization_data(localizations[event.id])
-            new_semantic_hash = semantic_hash(new_localization_data)
+            new_semantic_hash = semantic_hash(
+                self._official_localization_data(localizations[event.id])
+            )
+            semantic_changed = event.semantic_hash != new_semantic_hash
+            if semantic_changed:
+                for locale, localization in list(localizations[event.id].items()):
+                    if (
+                        locale not in incoming.localizations
+                        and localization.translation_source is TranslationSource.MACHINE
+                    ):
+                        await session.delete(localization)
+                        del localizations[event.id][locale]
+
+            official_rows = [
+                localization
+                for localization in localizations[event.id].values()
+                if localization.translation_source is TranslationSource.OFFICIAL
+            ]
+            if len(official_rows) == 1:
+                source_details_url = official_rows[0].details_url
+                for localization in localizations[event.id].values():
+                    if localization.translation_source is TranslationSource.MACHINE:
+                        localization.details_url = source_details_url
+                        localization.content_hash = canonical_hash(
+                            {
+                                "audience": localization.audience,
+                                "description": localization.description,
+                                "details_url": localization.details_url,
+                                "speaker": localization.speaker,
+                                "title": localization.title,
+                            }
+                        )
+
+            new_localization_data = self._official_localization_data(localizations[event.id])
             new_important = self._important_snapshot(event, new_localization_data)
             new_important_hash = important_hash(new_important)
             if (
@@ -592,20 +639,38 @@ class SyncService:
             event.semantic_hash = new_semantic_hash
             event.important_hash = new_important_hash
 
-            if is_new:
-                if baseline_before:
-                    self._add_domain_change(
-                        session,
-                        event,
-                        NotificationType.NEW_EVENT,
-                        {"new": True},
-                        categories[event.id],
-                    )
-            elif material_changed:
+            classification = classifications.get(event.id)
+            if not is_new and material_changed:
                 event.revision += 1
                 updated_events += 1
+            if classification is None or semantic_changed:
+                classification = self._queue_classification(
+                    session,
+                    event,
+                    classification,
+                    semantic_hash_value=new_semantic_hash,
+                    notify_new=is_new and baseline_before,
+                    now=now,
+                )
+                classifications[event.id] = classification
+
+            released_new = False
+            if classification is not None:
+                released_new = await self._release_ready_new_event(
+                    session,
+                    event,
+                    classification,
+                    categories[event.id],
+                    now,
+                )
+            if is_new:
+                continue
+            if material_changed:
                 important_diff = structured_diff(old_important, new_important)
-                if baseline_before and important_diff:
+                awaiting_new = bool(
+                    classification is not None and classification.result_metadata.get("notify_new")
+                )
+                if baseline_before and important_diff and not awaiting_new and not released_new:
                     self._add_domain_change(
                         session,
                         event,
@@ -629,7 +694,7 @@ class SyncService:
             event.missing_streak += 1
             if event.missing_streak < 2:
                 continue
-            old_localization_data = self._localization_data(localizations[event.id])
+            old_localization_data = self._official_localization_data(localizations[event.id])
             old_important = self._important_snapshot(event, old_localization_data)
             event.is_available = False
             event.state = EventState.HIDDEN
@@ -637,7 +702,11 @@ class SyncService:
             new_important = self._important_snapshot(event, old_localization_data)
             event.important_hash = important_hash(new_important)
             hidden += 1
-            if baseline_before:
+            classification = classifications.get(event.id)
+            awaiting_new = bool(
+                classification is not None and classification.result_metadata.get("notify_new")
+            )
+            if baseline_before and not awaiting_new:
                 self._add_domain_change(
                     session,
                     event,
@@ -646,6 +715,103 @@ class SyncService:
                     categories[event.id],
                 )
         return created, updated_events, hidden
+
+    @staticmethod
+    async def _release_ready_new_event(
+        session: AsyncSession,
+        event: Event,
+        classification: EventClassification,
+        categories: list[str],
+        now: datetime,
+    ) -> bool:
+        if (
+            not event.is_available
+            or not classification.result_metadata.get("notify_new")
+            or classification.status
+            not in (ClassificationStatus.COMPLETED, ClassificationStatus.FALLBACK)
+        ):
+            return False
+        existing = await session.scalar(
+            select(DomainChange.id).where(
+                DomainChange.event_id == event.id,
+                DomainChange.notification_type == NotificationType.NEW_EVENT,
+            )
+        )
+        if existing is None:
+            classified_at = classification.classified_at
+            session.add(
+                DomainChange(
+                    event_id=event.id,
+                    event_revision=event.revision,
+                    notification_type=NotificationType.NEW_EVENT,
+                    old_categories=[],
+                    new_categories=sorted(categories),
+                    change_data={
+                        "new": True,
+                        "classified_at": (
+                            classified_at.astimezone(UTC).isoformat()
+                            if classified_at is not None
+                            else now.isoformat()
+                        ),
+                    },
+                )
+            )
+        classification.result_metadata = {
+            **classification.result_metadata,
+            "notify_new": False,
+        }
+        return True
+
+    @staticmethod
+    def _queue_classification(
+        session: AsyncSession,
+        event: Event,
+        classification: EventClassification | None,
+        *,
+        semantic_hash_value: str,
+        notify_new: bool,
+        now: datetime,
+    ) -> EventClassification:
+        preserved_notify_new = notify_new
+        if classification is not None:
+            preserved_notify_new = preserved_notify_new or bool(
+                classification.result_metadata.get("notify_new")
+            )
+        metadata: dict[str, object] = {
+            "notify_new": preserved_notify_new,
+            "queued_revision": event.revision,
+        }
+        if classification is None:
+            classification = EventClassification(
+                event_id=event.id,
+                status=ClassificationStatus.PENDING,
+                semantic_hash=semantic_hash_value,
+                attempts=0,
+                input_tokens=0,
+                output_tokens=0,
+                cost_usd=Decimal("0"),
+                first_attempt_at=now,
+                next_attempt_at=now,
+                result_metadata=metadata,
+                created_at=now,
+            )
+            session.add(classification)
+            return classification
+
+        classification.status = ClassificationStatus.PENDING
+        classification.semantic_hash = semantic_hash_value
+        classification.model = None
+        classification.prompt_version = None
+        classification.attempts = 0
+        classification.input_tokens = 0
+        classification.output_tokens = 0
+        classification.cost_usd = Decimal("0")
+        classification.first_attempt_at = now
+        classification.next_attempt_at = now
+        classification.classified_at = None
+        classification.last_error_code = None
+        classification.result_metadata = metadata
+        return classification
 
     @staticmethod
     def _localization_data(
@@ -661,6 +827,18 @@ class SyncService:
             }
             for locale, row in rows.items()
         }
+
+    @staticmethod
+    def _official_localization_data(
+        rows: Mapping[Locale, EventLocalization],
+    ) -> dict[str, dict[str, str | None]]:
+        return SyncService._localization_data(
+            {
+                locale: row
+                for locale, row in rows.items()
+                if row.translation_source is TranslationSource.OFFICIAL
+            }
+        )
 
     @staticmethod
     def _important_snapshot(

@@ -1,4 +1,5 @@
 from datetime import time
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
@@ -31,6 +32,9 @@ def test_settings_parse_ids_defaults_and_aliases() -> None:
     assert settings.access_mode is AccessMode.ALLOWLIST
     assert settings.quiet_hours_start == time(22)
     assert settings.events_page_size == 5
+    assert settings.openai_input_price_per_million_usd == Decimal("0.20")
+    assert settings.openai_output_price_per_million_usd == Decimal("1.20")
+    assert settings.openai_timeout_seconds == 30
     assert settings.telegram_bot_token.get_secret_value() == "legacy-name-is-supported"
 
 
@@ -68,6 +72,14 @@ def test_public_mode_does_not_require_allowlist() -> None:
         ("SYNC_MAX_RETRIES", "11"),
         ("EVENTS_PAGE_SIZE", "0"),
         ("FEEDBACK_RETENTION_DAYS", "0"),
+        ("OPENAI_INPUT_PRICE_PER_MILLION_USD", "-0.01"),
+        ("OPENAI_OUTPUT_PRICE_PER_MILLION_USD", "-0.01"),
+        ("OPENAI_MONTHLY_BUDGET_USD", "NaN"),
+        ("OPENAI_INPUT_PRICE_PER_MILLION_USD", "Infinity"),
+        ("OPENAI_TIMEOUT_SECONDS", "0"),
+        ("OPENAI_TIMEOUT_SECONDS", "NaN"),
+        ("OPENAI_MODEL", "   "),
+        ("OPENAI_MODEL", "x" * 129),
         ("ADMIN_TELEGRAM_IDS", "not-an-id"),
         ("DATABASE_URL", "sqlite:///events.db"),
         ("APP_TIMEZONE", "Mars/Olympus"),
