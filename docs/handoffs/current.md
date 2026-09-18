@@ -8,8 +8,8 @@
 
 ## Current state
 
-- Этапы 1–2 завершены и находятся в `origin/main`; этап 3 полностью реализован в рабочем
-  дереве, но ещё не закоммичен.
+- Этапы 1–2 находятся в `origin/main`; этап 3 полностью реализован и сохранён локальными
+  коммитами `9948ec7` и `788dd07`, но ещё не отправлен в remote.
 - Реализованы DTO/нормализация, `TerriconClient`, транзакционный `SyncService`, hashes/diff,
   baseline/partial failure/missing streak, domain changes, admin alerts и read-only smoke.
 - Фактический live API принимает все 406 записей шести endpoint без invalid records.
@@ -89,10 +89,10 @@
 
 - Root: `/home/dev/workspace/projects/terriconparser`.
 - Branch: `main`, tracking `origin/main`.
-- HEAD: `211649f fix: align PostgreSQL migrations with metadata`.
-- Рабочее дерево содержит все незакоммиченные изменения подготовительных подэтапов и полной
-  реализации этапа 3; подробный список доступен через `git status --short`.
-- Коммит и push текущего подэтапа не выполнялись.
+- Этап 3: `9948ec7 feat: implement resilient Terricon event import` и
+  `788dd07 docs: record completion of stage 3`.
+- Рабочее дерево после фиксации этапа 3 чистое.
+- Push локальных коммитов не выполнялся.
 - On-disk `AGENTS.md` в проекте и родительском каталоге не найден; применять инструкции,
   переданные пользователем в сессии.
 
