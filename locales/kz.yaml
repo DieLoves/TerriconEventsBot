@@ -37,6 +37,8 @@ events:
   address: "TODO: Адрес"
   language: "TODO: Язык"
   categories: "TODO: Категории"
+  audience: "TODO: Для кого"
+  speaker: "TODO: Спикер"
 filters:
   title: "TODO: Фильтры"
   today: "TODO: Сегодня"
@@ -71,6 +73,19 @@ subscriptions:
   categories: "TODO: Выбранные категории"
   saved: "TODO: Подписки сохранены"
   none: "TODO: Подписки не выбраны"
+notifications:
+  new_events: "TODO: Новые мероприятия"
+  important_changes: "TODO: Важные изменения"
+  cancelled: "TODO: Событие отменено или недоступно"
+  changed: "TODO: Изменено"
+  fields:
+    address: "TODO: адрес"
+    format: "TODO: формат"
+    is_available: "TODO: доступность"
+    registration_url: "TODO: ссылка регистрации"
+    starts_at: "TODO: дата или время"
+    state: "TODO: статус"
+    titles: "TODO: название"
 settings:
   title: "TODO: Настройки"
   language: "TODO: Язык интерфейса"

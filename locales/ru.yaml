@@ -37,6 +37,8 @@ events:
   address: "Адрес"
   language: "Язык"
   categories: "Категории"
+  audience: "Для кого"
+  speaker: "Спикер"
 filters:
   title: "Фильтры"
   today: "Сегодня"
@@ -71,6 +73,19 @@ subscriptions:
   categories: "Выбранные категории"
   saved: "Подписки сохранены."
   none: "Подписки не выбраны."
+notifications:
+  new_events: "Новые мероприятия"
+  important_changes: "Важные изменения"
+  cancelled: "Событие отменено или больше недоступно."
+  changed: "Изменено"
+  fields:
+    address: "адрес"
+    format: "формат"
+    is_available: "доступность"
+    registration_url: "ссылка регистрации"
+    starts_at: "дата или время"
+    state: "статус"
+    titles: "название"
 settings:
   title: "Настройки"
   language: "Язык интерфейса"

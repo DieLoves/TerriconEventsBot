@@ -32,6 +32,11 @@ class DomainChange(Base):
         CheckConstraint("event_revision >= 1", name="revision_positive"),
         UniqueConstraint("event_id", "event_revision", "notification_type"),
         Index("ix_domain_changes_created_at", "created_at"),
+        Index(
+            "ix_domain_changes_unmaterialized",
+            "id",
+            postgresql_where=text("materialized_at IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -54,6 +59,7 @@ class DomainChange(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    materialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class NotificationOutbox(Base):
@@ -64,6 +70,12 @@ class NotificationOutbox(Base):
             "ix_notification_outbox_pending_available",
             "available_at",
             postgresql_where=text("status IN ('pending', 'retry_wait')"),
+        ),
+        Index(
+            "ix_notification_outbox_claimable",
+            "available_at",
+            "locked_at",
+            postgresql_where=text("status IN ('pending', 'retry_wait', 'processing')"),
         ),
     )
 
