@@ -9,7 +9,13 @@ from terricon_events_bot.domain.catalog import (
     CatalogSection,
     EventLanguage,
 )
-from terricon_events_bot.domain.enums import CategorySlug, EventFormat, Locale
+from terricon_events_bot.domain.enums import (
+    BroadcastAudience,
+    CategorySlug,
+    EventFormat,
+    FeedbackKind,
+    Locale,
+)
 
 
 class NavigationView(StrEnum):
@@ -32,6 +38,35 @@ class EventAction(StrEnum):
 class ToggleSetting(StrEnum):
     MENU_IMAGES = "m"
     EVENT_POSTERS = "p"
+
+
+class FeedbackAction(StrEnum):
+    SKIP_PHOTO = "s"
+    CONFIRM = "y"
+    CANCEL = "x"
+
+
+class AdminTicketAction(StrEnum):
+    VIEW = "v"
+    REPLY = "r"
+    CLOSE = "c"
+    BLOCK = "b"
+    UNBLOCK = "u"
+
+
+class AdminAction(StrEnum):
+    MENU = "m"
+    STATUS = "s"
+    STATS = "t"
+    SYNC = "y"
+    TICKETS = "k"
+    BROADCAST = "b"
+
+
+class BroadcastAction(StrEnum):
+    SKIP_PHOTO = "s"
+    CONFIRM = "y"
+    CANCEL = "x"
 
 
 class ChooseLocaleCallback(CallbackData, prefix="ol"):
@@ -104,3 +139,33 @@ class SubscriptionAllCallback(CallbackData, prefix="sa"):
 
 class SubscriptionCategoryCallback(CallbackData, prefix="sb"):
     category: CategorySlug
+
+
+class FeedbackKindCallback(CallbackData, prefix="fk"):
+    kind: FeedbackKind
+
+
+class FeedbackActionCallback(CallbackData, prefix="fa"):
+    action: FeedbackAction
+
+
+class DeleteProfileCallback(CallbackData, prefix="du"):
+    pass
+
+
+class AdminActionCallback(CallbackData, prefix="aa"):
+    action: AdminAction
+
+
+class AdminTicketCallback(CallbackData, prefix="at"):
+    ticket_id: int
+    action: AdminTicketAction
+
+
+class BroadcastAudienceCallback(CallbackData, prefix="ba"):
+    audience: BroadcastAudience
+
+
+class BroadcastActionCallback(CallbackData, prefix="bx"):
+    broadcast_id: int
+    action: BroadcastAction

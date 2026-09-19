@@ -6,8 +6,19 @@ from terricon_events_bot.domain.catalog import (
     CatalogSection,
     EventLanguage,
 )
-from terricon_events_bot.domain.enums import CategorySlug, EventFormat, Locale
+from terricon_events_bot.domain.enums import (
+    BroadcastAudience,
+    CategorySlug,
+    EventFormat,
+    FeedbackKind,
+    Locale,
+)
 from terricon_events_bot.telegram.callbacks import (
+    AdminTicketAction,
+    AdminTicketCallback,
+    BroadcastAction,
+    BroadcastActionCallback,
+    BroadcastAudienceCallback,
     CatalogCategoryCallback,
     CatalogFormatCallback,
     CatalogLanguageCallback,
@@ -16,6 +27,9 @@ from terricon_events_bot.telegram.callbacks import (
     ChooseLocaleCallback,
     EventAction,
     EventCallback,
+    FeedbackAction,
+    FeedbackActionCallback,
+    FeedbackKindCallback,
     SubscriptionAllCallback,
     SubscriptionCategoryCallback,
 )
@@ -40,6 +54,17 @@ def test_callback_contracts_round_trip_stable_codes_and_fit_telegram_limit() -> 
         ),
         SubscriptionAllCallback(),
         SubscriptionCategoryCallback(category=CategorySlug.SOFT_SKILLS_LANGUAGES),
+        FeedbackKindCallback(kind=FeedbackKind.ERROR),
+        FeedbackActionCallback(action=FeedbackAction.CONFIRM),
+        AdminTicketCallback(
+            ticket_id=9_223_372_036_854_775_807,
+            action=AdminTicketAction.UNBLOCK,
+        ),
+        BroadcastAudienceCallback(audience=BroadcastAudience.BOTH),
+        BroadcastActionCallback(
+            broadcast_id=9_223_372_036_854_775_807,
+            action=BroadcastAction.CONFIRM,
+        ),
     )
 
     for callback in values:

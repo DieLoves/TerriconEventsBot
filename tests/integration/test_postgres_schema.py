@@ -39,12 +39,18 @@ async def test_migrations_create_all_tables_and_critical_indexes(
             change_indexes = await connection.run_sync(
                 lambda sync: {item["name"] for item in inspect(sync).get_indexes("domain_changes")}
             )
+            broadcast_delivery_indexes = await connection.run_sync(
+                lambda sync: {
+                    item["name"] for item in inspect(sync).get_indexes("broadcast_deliveries")
+                }
+            )
 
         assert set(Base.metadata.tables) <= tables
         assert {"ix_events_starts_at", "ix_events_available_starts_at"} <= event_indexes
         assert "ix_notification_outbox_pending_available" in outbox_indexes
         assert "ix_notification_outbox_claimable" in outbox_indexes
         assert "ix_domain_changes_unmaterialized" in change_indexes
+        assert "ix_broadcast_deliveries_claimable" in broadcast_delivery_indexes
     finally:
         await engine.dispose()
 

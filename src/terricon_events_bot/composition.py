@@ -6,6 +6,8 @@ from aiogram import Bot, Router
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from terricon_events_bot.application.admin import AdminService
+from terricon_events_bot.application.broadcasts import BroadcastService, BroadcastWorker
 from terricon_events_bot.application.catalog import CatalogQuery, CatalogStateStore
 from terricon_events_bot.application.classification import (
     ClassificationWorker,
@@ -17,6 +19,12 @@ from terricon_events_bot.application.delivery import (
     OutboxService,
     QuietHours,
 )
+from terricon_events_bot.application.feedback import FeedbackService
+from terricon_events_bot.application.operations import (
+    AdvisoryJobCoordinator,
+    LockedSyncRunner,
+    SyncRunner,
+)
 from terricon_events_bot.application.subscriptions import SubscriptionService
 from terricon_events_bot.application.sync import SyncService
 from terricon_events_bot.application.users import UserService
@@ -27,7 +35,13 @@ from terricon_events_bot.infrastructure.database import create_engine, create_se
 from terricon_events_bot.infrastructure.openai_adapter import OpenAIEventAdapter
 from terricon_events_bot.infrastructure.terricon import TerriconClient
 from terricon_events_bot.localization import LocalizationCatalog
+from terricon_events_bot.telegram.admin import AdminTelegramController, build_admin_router
+from terricon_events_bot.telegram.broadcasts import AiogramBroadcastGateway
 from terricon_events_bot.telegram.delivery import AiogramTelegramGateway
+from terricon_events_bot.telegram.feedback import (
+    AiogramFeedbackGateway,
+    FeedbackTelegramController,
+)
 from terricon_events_bot.telegram.middleware import UserContextMiddleware
 from terricon_events_bot.telegram.rendering import ScreenRenderer
 from terricon_events_bot.telegram.router import build_user_router
@@ -43,12 +57,17 @@ class Foundation:
     assets: AssetResolver
     http_client: httpx.AsyncClient
     terricon_client: TerriconClient
-    sync_service: SyncService
+    sync_service: SyncRunner
+    job_coordinator: AdvisoryJobCoordinator
     openai_client: AsyncOpenAI
     openai_adapter: OpenAIEventAdapter
     classification_worker: ClassificationWorker
     outbox_service: OutboxService
     delivery_worker: DeliveryWorker
+    feedback_service: FeedbackService
+    admin_service: AdminService
+    broadcast_service: BroadcastService
+    broadcast_worker: BroadcastWorker
     bot: Bot
     catalog_query: CatalogQuery
     catalog_state: CatalogStateStore
@@ -83,6 +102,11 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         str(settings.base_url),
         http_client,
         max_retries=settings.sync_max_retries,
+    )
+    job_coordinator = AdvisoryJobCoordinator(session_factory)
+    sync_service = LockedSyncRunner(
+        SyncService(session_factory, terricon_client),
+        job_coordinator,
     )
     openai_client = AsyncOpenAI(
         api_key=settings.openai_api_key.get_secret_value(),
@@ -135,7 +159,22 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         timezone=settings.timezone,
     )
     middleware = UserContextMiddleware(user_service, localizations)
-    telegram_router = build_user_router(
+    feedback_service = FeedbackService(session_factory)
+    admin_service = AdminService(session_factory)
+    broadcast_service = BroadcastService(session_factory)
+    broadcast_worker = BroadcastWorker(
+        session_factory,
+        AiogramBroadcastGateway(bot),
+    )
+    feedback_gateway = AiogramFeedbackGateway(bot, settings.resolved_admin_chat_id)
+    feedback_controller = FeedbackTelegramController(
+        feedback_service,
+        feedback_gateway,
+        user_service,
+        screen_renderer,
+        telegram_views,
+    )
+    user_router = build_user_router(
         user_service,
         subscription_service,
         catalog_query,
@@ -143,7 +182,22 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         screen_renderer,
         telegram_views,
         middleware,
+        feedback_controller,
     )
+    admin_router = build_admin_router(
+        AdminTelegramController(
+            admin_service,
+            feedback_service,
+            broadcast_service,
+            sync_service,
+            feedback_gateway,
+            user_service,
+        ),
+        middleware,
+    )
+    telegram_router = Router(name="application")
+    telegram_router.include_router(admin_router)
+    telegram_router.include_router(user_router)
     return Foundation(
         settings=settings,
         engine=engine,
@@ -152,12 +206,17 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         assets=assets,
         http_client=http_client,
         terricon_client=terricon_client,
-        sync_service=SyncService(session_factory, terricon_client),
+        sync_service=sync_service,
+        job_coordinator=job_coordinator,
         openai_client=openai_client,
         openai_adapter=openai_adapter,
         classification_worker=classification_worker,
         outbox_service=outbox_service,
         delivery_worker=delivery_worker,
+        feedback_service=feedback_service,
+        admin_service=admin_service,
+        broadcast_service=broadcast_service,
+        broadcast_worker=broadcast_worker,
         bot=bot,
         catalog_query=catalog_query,
         catalog_state=catalog_state,

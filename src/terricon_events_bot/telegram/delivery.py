@@ -21,16 +21,20 @@ class AiogramTelegramGateway:
     async def send_message(self, telegram_id: int, text: str) -> int:
         try:
             message = await self._bot.send_message(chat_id=telegram_id, text=text)
-        except TelegramForbiddenError as error:
-            raise TelegramSendError("telegram_forbidden", blocked=True) from error
-        except TelegramRetryAfter as error:
-            raise TelegramSendError(
-                "telegram_retry_after",
-                transient=True,
-                retry_after=timedelta(seconds=error.retry_after),
-            ) from error
-        except (TelegramNetworkError, TelegramServerError) as error:
-            raise TelegramSendError("telegram_transient", transient=True) from error
         except TelegramAPIError as error:
-            raise TelegramSendError("telegram_permanent") from error
+            raise normalize_telegram_error(error) from error
         return message.message_id
+
+
+def normalize_telegram_error(error: TelegramAPIError) -> TelegramSendError:
+    if isinstance(error, TelegramForbiddenError):
+        return TelegramSendError("telegram_forbidden", blocked=True)
+    if isinstance(error, TelegramRetryAfter):
+        return TelegramSendError(
+            "telegram_retry_after",
+            transient=True,
+            retry_after=timedelta(seconds=error.retry_after),
+        )
+    if isinstance(error, (TelegramNetworkError, TelegramServerError)):
+        return TelegramSendError("telegram_transient", transient=True)
+    return TelegramSendError("telegram_permanent")

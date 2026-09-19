@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from terricon_events_bot.application.feedback import FeedbackDraft
 from terricon_events_bot.application.subscriptions import SubscriptionSummary
 from terricon_events_bot.domain.catalog import (
     CatalogFilter,
@@ -17,6 +18,7 @@ from terricon_events_bot.domain.catalog import (
 from terricon_events_bot.domain.enums import (
     CategorySlug,
     EventFormat,
+    FeedbackKind,
     Locale,
     TranslationSource,
 )
@@ -171,3 +173,25 @@ def test_kz_fallback_and_image_preferences_are_applied(tmp_path: Path) -> None:
         ).image
         is None
     )
+
+
+def test_feedback_wizard_and_delete_warning_require_confirmation(tmp_path: Path) -> None:
+    telegram_views = views(tmp_path)
+    current_user = user()
+
+    feedback = telegram_views.feedback(current_user)
+    preview = telegram_views.feedback_preview(
+        current_user,
+        FeedbackDraft(FeedbackKind.ERROR, "Unsafe <text>", "photo-id", "preview"),
+    )
+    privacy = telegram_views.privacy(current_user, warning=True)
+
+    assert {button.text for row in feedback.keyboard.inline_keyboard for button in row} >= {
+        "Ошибка",
+        "Идея",
+        "Другое",
+    }
+    assert "Unsafe &lt;text&gt;" in preview.text
+    assert "Подтвердить" in {
+        button.text for row in privacy.keyboard.inline_keyboard for button in row
+    }

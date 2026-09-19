@@ -8,9 +8,10 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from terricon_events_bot.domain.enums import AccessMode, Locale
+from terricon_events_bot.domain.enums import AccessMode, Locale, TicketStatus
 from terricon_events_bot.infrastructure.models import (
     BetaAllowlistEntry,
+    FeedbackTicket,
     FsmState,
     User,
 )
@@ -108,6 +109,32 @@ class UserService:
                         FsmState.scope == "catalog",
                     )
                 )
+
+    async def deactivate(self, user_id: int) -> None:
+        await self._update_user(user_id, is_active=False)
+
+    async def delete_profile(self, user_id: int) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                user = await session.scalar(
+                    select(User).where(User.id == user_id).with_for_update()
+                )
+                if user is None:
+                    return
+                now = datetime.now(UTC)
+                await session.execute(
+                    update(FeedbackTicket)
+                    .where(
+                        FeedbackTicket.user_id == user_id,
+                        FeedbackTicket.status != TicketStatus.CLOSED,
+                    )
+                    .values(
+                        status=TicketStatus.CLOSED,
+                        closed_at=now,
+                        updated_at=now,
+                    )
+                )
+                await session.delete(user)
 
     async def _is_allowed(self, session: AsyncSession, telegram_id: int, is_admin: bool) -> bool:
         if self._access_mode is AccessMode.PUBLIC or is_admin:

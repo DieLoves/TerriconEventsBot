@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from aiogram.utils.token import TokenValidationError, validate_token
 from pydantic import (
     AliasChoices,
     Field,
@@ -15,6 +16,8 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 from terricon_events_bot.domain.enums import AccessMode
 
@@ -79,6 +82,7 @@ class Settings(BaseSettings):
     )
     database_url: SecretStr = Field(min_length=1, validation_alias="DATABASE_URL")
     admin_telegram_ids: TelegramIds = Field(repr=False, validation_alias="ADMIN_TELEGRAM_IDS")
+    admin_chat_id: int | None = Field(default=None, validation_alias="ADMIN_CHAT_ID")
     access_mode: AccessMode = Field(default=AccessMode.ALLOWLIST, validation_alias="ACCESS_MODE")
     allowed_telegram_ids: TelegramIds = Field(
         default_factory=frozenset, repr=False, validation_alias="ALLOWED_TELEGRAM_IDS"
@@ -106,11 +110,29 @@ class Settings(BaseSettings):
     def normalize_openai_model(cls, value: Any) -> Any:
         return value.strip() if isinstance(value, str) else value
 
+    @field_validator("telegram_bot_token", mode="before")
+    @classmethod
+    def validate_telegram_bot_token(cls, value: Any) -> Any:
+        try:
+            valid = isinstance(value, str) and validate_token(value)
+        except TokenValidationError:
+            valid = False
+        if not valid:
+            raise ValueError("TELEGRAM_BOT_TOKEN is invalid")
+        return value
+
     @field_validator("admin_telegram_ids", "allowed_telegram_ids")
     @classmethod
     def validate_positive_telegram_ids(cls, value: frozenset[int]) -> frozenset[int]:
         if any(item <= 0 for item in value):
             raise ValueError("Telegram IDs must be positive")
+        return value
+
+    @field_validator("admin_chat_id")
+    @classmethod
+    def validate_admin_chat_id(cls, value: int | None) -> int | None:
+        if value == 0:
+            raise ValueError("ADMIN_CHAT_ID must be nonzero")
         return value
 
     @field_validator("database_url", mode="before")
@@ -120,6 +142,13 @@ class Settings(BaseSettings):
             ("postgresql+asyncpg://", "postgresql://")
         ):
             raise ValueError("DATABASE_URL must be a PostgreSQL URL")
+        try:
+            parsed = make_url(value)
+            _ = parsed.port
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise ValueError("DATABASE_URL must be a valid PostgreSQL URL") from error
+        if parsed.drivername not in {"postgresql", "postgresql+asyncpg"}:
+            raise ValueError("DATABASE_URL must use PostgreSQL")
         return value
 
     @field_validator("app_timezone")
@@ -150,6 +179,10 @@ class Settings(BaseSettings):
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.app_timezone)
+
+    @property
+    def resolved_admin_chat_id(self) -> int:
+        return self.admin_chat_id or min(self.admin_telegram_ids)
 
 
 def load_settings(env_file: str | Path = ".env") -> Settings:

@@ -22,6 +22,9 @@ dependencies = [
 
 [project.scripts]
 terricon-api-smoke = "terricon_events_bot.infrastructure.terricon.smoke:main"
+terricon-bot = "terricon_events_bot.runtime:main"
+terricon-preflight = "terricon_events_bot.runtime:preflight_main"
+terricon-healthcheck = "terricon_events_bot.runtime:healthcheck_main"
 
 [dependency-groups]
 dev = [

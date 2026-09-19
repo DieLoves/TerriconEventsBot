@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
 import pytest
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, Router
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import TelegramMethod
 from aiogram.types import Update
@@ -20,6 +20,7 @@ from terricon_events_bot.domain.enums import Locale
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.localization import LocalizationCatalog
+from terricon_events_bot.telegram.admin import AdminTelegramController, build_admin_router
 from terricon_events_bot.telegram.callbacks import ChooseLocaleCallback
 from terricon_events_bot.telegram.middleware import UserContextMiddleware
 from terricon_events_bot.telegram.rendering import ScreenRenderer
@@ -102,8 +103,20 @@ async def test_start_and_locale_callback_flow_through_router_middleware(tmp_path
         views,
         UserContextMiddleware(cast(UserService, users), localizations),
     )
+    middleware = UserContextMiddleware(cast(UserService, users), localizations)
+    admin_controller = AdminTelegramController(
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+        cast(UserService, users),
+    )
+    root = Router(name="application-test")
+    root.include_router(build_admin_router(admin_controller, middleware))
+    root.include_router(router)
     dispatcher = Dispatcher()
-    dispatcher.include_router(router)
+    dispatcher.include_router(root)
     session = FakeTelegramSession()
     bot = Bot("123456:abcdefghijklmnopqrstuvwxyzABCDE12345678", session=session)
 

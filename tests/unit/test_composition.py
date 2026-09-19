@@ -48,13 +48,17 @@ async def test_foundation_wires_and_closes_terricon_import_services() -> None:
         assert foundation.classification_worker is not None
         assert foundation.outbox_service is not None
         assert foundation.delivery_worker is not None
+        assert foundation.feedback_service is not None
+        assert foundation.admin_service is not None
+        assert foundation.broadcast_service is not None
+        assert foundation.broadcast_worker is not None
         assert foundation.catalog_query is not None
         assert foundation.catalog_state is not None
         assert foundation.user_service is not None
         assert foundation.subscription_service is not None
         assert foundation.screen_renderer is not None
         assert foundation.telegram_views is not None
-        assert foundation.telegram_router.name == "user-ui"
+        assert foundation.telegram_router.name == "application"
         assert not foundation.http_client.is_closed
         assert not foundation.openai_client.is_closed()
     finally:

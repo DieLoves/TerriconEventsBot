@@ -16,6 +16,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from terricon_events_bot.domain.enums import (
@@ -61,6 +62,7 @@ class Broadcast(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    report_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -88,6 +90,12 @@ class BroadcastDelivery(Base):
         CheckConstraint("attempts >= 0", name="attempts_nonnegative"),
         UniqueConstraint("broadcast_id", "user_id"),
         Index("ix_broadcast_deliveries_status_next_attempt", "status", "next_attempt_at"),
+        Index(
+            "ix_broadcast_deliveries_claimable",
+            "next_attempt_at",
+            "locked_at",
+            postgresql_where=text("status IN ('pending', 'retry_wait', 'processing')"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -105,8 +113,12 @@ class BroadcastDelivery(Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    telegram_message_ids: Mapped[list[int]] = mapped_column(
+        ARRAY(BigInteger), nullable=False, default=list, server_default=text("'{}'::bigint[]")
+    )
     last_error_code: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

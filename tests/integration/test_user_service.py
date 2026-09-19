@@ -91,6 +91,7 @@ async def test_public_concurrent_upsert_and_settings_are_persistent(
     await users.complete_onboarding(context.user.id)
     assert await users.toggle_menu_images(context.user.id) is False
     assert await users.toggle_event_posters(context.user.id) is False
+    await users.deactivate(context.user.id)
 
     async with session_factory() as session:
         rows = (await session.scalars(select(User))).all()
@@ -100,6 +101,7 @@ async def test_public_concurrent_upsert_and_settings_are_persistent(
     assert rows[0].onboarding_completed
     assert not rows[0].menu_images_enabled
     assert not rows[0].event_posters_enabled
+    assert not rows[0].is_active
 
 
 @pytest.mark.asyncio

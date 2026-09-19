@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from terricon_events_bot.application.feedback import FeedbackDraft
 from terricon_events_bot.application.subscriptions import SubscriptionSummary
 from terricon_events_bot.domain.catalog import (
     CatalogPage,
@@ -19,7 +20,13 @@ from terricon_events_bot.domain.catalog import (
     EventDetails,
     EventLanguage,
 )
-from terricon_events_bot.domain.enums import CategorySlug, EventFormat, Locale, TranslationSource
+from terricon_events_bot.domain.enums import (
+    CategorySlug,
+    EventFormat,
+    FeedbackKind,
+    Locale,
+    TranslationSource,
+)
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.infrastructure.terricon.normalization import normalize_http_url
@@ -36,8 +43,12 @@ from terricon_events_bot.telegram.callbacks import (
     CatalogSectionCallback,
     ChooseLocaleCallback,
     ContinueOnboardingCallback,
+    DeleteProfileCallback,
     EventAction,
     EventCallback,
+    FeedbackAction,
+    FeedbackActionCallback,
+    FeedbackKindCallback,
     NavigationCallback,
     NavigationView,
     SettingLocaleCallback,
@@ -545,6 +556,15 @@ class TelegramViews:
                     ),
                 )
             )
+        else:
+            rows.append(
+                (
+                    self._callback_button(
+                        self._text(locale, "common.confirm"),
+                        DeleteProfileCallback(),
+                    ),
+                )
+            )
         rows.append(self._back_row(locale, NavigationView.SETTINGS))
         return Screen(text=self._escape(text), keyboard=self._keyboard(rows))
 
@@ -552,7 +572,103 @@ class TelegramViews:
         locale = user.locale
         return Screen(
             text=f"<b>{self._escape(self._text(locale, 'feedback.title'))}</b>",
-            keyboard=self._keyboard((self._back_row(locale, NavigationView.MENU),)),
+            keyboard=self._keyboard(
+                (
+                    (
+                        self._callback_button(
+                            self._text(locale, "feedback.kind_error"),
+                            FeedbackKindCallback(kind=FeedbackKind.ERROR),
+                        ),
+                        self._callback_button(
+                            self._text(locale, "feedback.kind_idea"),
+                            FeedbackKindCallback(kind=FeedbackKind.IDEA),
+                        ),
+                    ),
+                    (
+                        self._callback_button(
+                            self._text(locale, "feedback.kind_other"),
+                            FeedbackKindCallback(kind=FeedbackKind.OTHER),
+                        ),
+                    ),
+                    self._back_row(locale, NavigationView.MENU),
+                )
+            ),
+        )
+
+    def feedback_text_prompt(self, user: User) -> Screen:
+        return self._feedback_step(user, "feedback.enter_text")
+
+    def feedback_photo_prompt(self, user: User) -> Screen:
+        locale = user.locale
+        return Screen(
+            text=self._escape(self._text(locale, "feedback.attach_photo")),
+            keyboard=self._keyboard(
+                (
+                    (
+                        self._callback_button(
+                            self._text(locale, "feedback.skip_photo"),
+                            FeedbackActionCallback(action=FeedbackAction.SKIP_PHOTO),
+                        ),
+                    ),
+                    (
+                        self._callback_button(
+                            self._text(locale, "common.cancel"),
+                            FeedbackActionCallback(action=FeedbackAction.CANCEL),
+                        ),
+                    ),
+                )
+            ),
+        )
+
+    def feedback_preview(self, user: User, draft: FeedbackDraft) -> Screen:
+        locale = user.locale
+        kind = self._text(locale, f"feedback.kind_{draft.kind.value}")
+        body = self._escape(draft.body or "")
+        photo = self._text(locale, "common.yes" if draft.telegram_file_id else "common.no")
+        text = (
+            f"<b>{self._escape(self._text(locale, 'feedback.preview'))}</b>\n\n"
+            f"{self._escape(kind)}\n\n{body}\n\n📷 {self._escape(photo)}"
+        )
+        return Screen(
+            text=text,
+            keyboard=self._keyboard(
+                (
+                    (
+                        self._callback_button(
+                            self._text(locale, "common.confirm"),
+                            FeedbackActionCallback(action=FeedbackAction.CONFIRM),
+                        ),
+                    ),
+                    (
+                        self._callback_button(
+                            self._text(locale, "common.cancel"),
+                            FeedbackActionCallback(action=FeedbackAction.CANCEL),
+                        ),
+                    ),
+                )
+            ),
+        )
+
+    def feedback_notice(self, user: User, key: str) -> Screen:
+        return Screen(
+            text=self._escape(self._text(user.locale, key)),
+            keyboard=self._keyboard((self._back_row(user.locale, NavigationView.MENU),)),
+        )
+
+    def _feedback_step(self, user: User, key: str) -> Screen:
+        locale = user.locale
+        return Screen(
+            text=self._escape(self._text(locale, key)),
+            keyboard=self._keyboard(
+                (
+                    (
+                        self._callback_button(
+                            self._text(locale, "common.cancel"),
+                            FeedbackActionCallback(action=FeedbackAction.CANCEL),
+                        ),
+                    ),
+                )
+            ),
         )
 
     def about(self, user: User) -> Screen:

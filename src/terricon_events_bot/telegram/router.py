@@ -24,8 +24,11 @@ from terricon_events_bot.telegram.callbacks import (
     CatalogSectionCallback,
     ChooseLocaleCallback,
     ContinueOnboardingCallback,
+    DeleteProfileCallback,
     EventAction,
     EventCallback,
+    FeedbackActionCallback,
+    FeedbackKindCallback,
     NavigationCallback,
     NavigationView,
     SettingLocaleCallback,
@@ -34,6 +37,7 @@ from terricon_events_bot.telegram.callbacks import (
     SubscriptionCategoryCallback,
     ToggleSetting,
 )
+from terricon_events_bot.telegram.feedback import FeedbackTelegramController
 from terricon_events_bot.telegram.middleware import UserContextMiddleware
 from terricon_events_bot.telegram.rendering import Screen, ScreenRenderer
 from terricon_events_bot.telegram.views import TelegramViews
@@ -48,6 +52,7 @@ class TelegramController:
         catalog_state: CatalogStateStore,
         renderer: ScreenRenderer,
         views: TelegramViews,
+        feedback: FeedbackTelegramController | None = None,
     ) -> None:
         self._users = users
         self._subscriptions = subscriptions
@@ -55,6 +60,7 @@ class TelegramController:
         self._catalog_state = catalog_state
         self._renderer = renderer
         self._views = views
+        self._feedback = feedback
 
     async def start(self, message: Message, current_user: User) -> None:
         await self._render_message(
@@ -66,6 +72,10 @@ class TelegramController:
         )
 
     async def unknown_message(self, message: Message, current_user: User) -> None:
+        if self._feedback is not None and await self._feedback.handle_message(
+            message, current_user
+        ):
+            return
         await self.start(message, current_user)
 
     async def choose_locale(
@@ -461,8 +471,17 @@ def build_user_router(
     renderer: ScreenRenderer,
     views: TelegramViews,
     middleware: UserContextMiddleware,
+    feedback: FeedbackTelegramController | None = None,
 ) -> Router:
-    controller = TelegramController(users, subscriptions, catalog, catalog_state, renderer, views)
+    controller = TelegramController(
+        users,
+        subscriptions,
+        catalog,
+        catalog_state,
+        renderer,
+        views,
+        feedback,
+    )
     router = Router(name="user-ui")
     router.message.filter(F.chat.type == ChatType.PRIVATE)
     router.callback_query.filter(F.message.chat.type == ChatType.PRIVATE)
@@ -493,6 +512,10 @@ def build_user_router(
     router.callback_query.register(
         controller.toggle_subscription_category, SubscriptionCategoryCallback.filter()
     )
+    if feedback is not None:
+        router.callback_query.register(feedback.choose_kind, FeedbackKindCallback.filter())
+        router.callback_query.register(feedback.action, FeedbackActionCallback.filter())
+        router.callback_query.register(feedback.delete_profile, DeleteProfileCallback.filter())
     router.callback_query.register(controller.unknown_callback)
     router.message.register(controller.unknown_message)
     return router
