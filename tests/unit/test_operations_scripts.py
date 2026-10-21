@@ -70,8 +70,8 @@ case "$*" in
     run*) printf 'container-id\\n' ;;
     *pg_isready*) exit 0 ;;
     *pg_restore*) exit 0 ;;
-    *version_num*) printf '0010_hardening_queue_state\\n' ;;
-    *information_schema.tables*) printf '24\\n' ;;
+    *version_num*) printf '0011_groq_shared_quota\\n' ;;
+    *information_schema.tables*) printf '26\\n' ;;
     'rm --force'*) exit 0 ;;
     *) exit 2 ;;
 esac
@@ -88,7 +88,7 @@ esac
     output = run_script("restore-smoke.sh", env=env, argument=str(archive))
 
     calls = log_path.read_text(encoding="utf-8")
-    assert output == "Restore smoke OK: revision 0010_hardening_queue_state, public tables 24."
+    assert output == "Restore smoke OK: revision 0011_groq_shared_quota, public tables 26."
     assert "run --detach" in calls
     assert "pg_restore --exit-on-error" in calls
     assert "rm --force terricon-restore-smoke-" in calls
@@ -103,7 +103,7 @@ case "$*" in
     *pg_isready*) exit 0 ;;
     *pg_restore*) exit 0 ;;
     *version_num*) printf '0009_stage7_broadcast_state\\n' ;;
-    *information_schema.tables*) printf '24\\n' ;;
+    *information_schema.tables*) printf '26\\n' ;;
     'rm --force'*) exit 0 ;;
     *) exit 2 ;;
 esac
@@ -119,4 +119,4 @@ esac
     with pytest.raises(subprocess.CalledProcessError) as caught:
         run_script("restore-smoke.sh", env=env, argument=str(archive))
 
-    assert "expected 0010_hardening_queue_state" in caught.value.stderr
+    assert "expected 0011_groq_shared_quota" in caught.value.stderr

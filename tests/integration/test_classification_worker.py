@@ -598,3 +598,82 @@ async def test_concurrent_budget_alert_upsert_is_race_safe(
     assert ai.classification_calls == []
     assert len(alerts) == 1
     assert alerts[0].occurrence_count == 2
+
+
+async def test_initial_import_quota_restart_and_24h_fallback(classification_database):
+    from terricon_events_bot.infrastructure.ai_quota import PostgresAIQuota, QuotaLimits
+
+    _, factory = classification_database
+    clock = MutableClock()
+    ids = [await seed_job(factory, 8000 + i) for i in range(30)]
+
+    class QuotaAI(FakeAI):
+        async def classify_event(self, value):
+            guard = PostgresAIQuota(
+                factory, "initial-import", QuotaLimits(2, 1000, 10000, 100000), clock=clock
+            )
+            reservation = await guard.reserve(200)
+            result = await super().classify_event(value)
+            await guard.settle(reservation, result.usage, {})
+            return result
+
+    ai = QuotaAI()
+    first = await worker(factory, ai, clock).run_batch(limit=100)
+    assert (first.claimed, first.completed, first.retried) == (3, 2, 1)
+    assert len(ai.classification_calls) == 2
+    # New worker/guard instances share the persistent reservation state.
+    second = await worker(factory, ai, clock).run_batch(limit=100)
+    assert second.completed == 0
+    assert len(ai.classification_calls) == 2
+    clock.value += timedelta(seconds=60)
+    recovered = await worker(factory, ai, clock).run_batch(limit=100)
+    assert recovered.completed == 2
+    clock.value = NOW + timedelta(hours=25)
+    final = await worker(factory, ai, clock).run_batch(limit=100)
+    assert final.fallback == 26
+    assert len(ai.classification_calls) == 4
+    async with factory() as session:
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(DomainChange).where(DomainChange.event_id.in_(ids))
+            )
+            == 30
+        )
+
+
+async def test_expired_unattempted_job_precedes_fresh_quota_denial(classification_database):
+    _, factory = classification_database
+    fresh = await seed_job(factory, 8990)
+    expired = await seed_job(factory, 8991)
+    async with factory() as session, session.begin():
+        old = await session.get(EventClassification, expired)
+        old.created_at = NOW - timedelta(hours=25)
+        old.first_attempt_at = None
+        old.next_attempt_at = NOW
+        new = await session.get(EventClassification, fresh)
+        new.next_attempt_at = None
+    ai = FakeAI()
+    ai.classification_error = AIAdapterError("rate_limit", retry_after_seconds=86400)
+    result = await worker(factory, ai, MutableClock()).run_batch(limit=100)
+    assert result.fallback == 1
+    assert result.retried == 1
+    assert len(ai.classification_calls) == 1
+    async with factory() as session:
+        old = await session.get(EventClassification, expired)
+        assert old.status is ClassificationStatus.FALLBACK
+        assert old.attempts == 0
+
+
+async def test_first_quota_denial_does_not_reset_queued_deadline(classification_database):
+    _, factory = classification_database
+    event_id = await seed_job(factory, 8992)
+    async with factory() as session, session.begin():
+        row = await session.get(EventClassification, event_id)
+        row.created_at = NOW - timedelta(hours=23, minutes=59)
+        row.first_attempt_at = None
+    ai = FakeAI()
+    ai.classification_error = AIAdapterError("rate_limit", retry_after_seconds=86400)
+    await worker(factory, ai, MutableClock()).run_batch()
+    async with factory() as session:
+        row = await session.get(EventClassification, event_id)
+        assert row.next_attempt_at == NOW + timedelta(minutes=1)

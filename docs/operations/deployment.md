@@ -29,7 +29,7 @@ BACKUP_DIR=/var/backups/terricon-events-bot ./scripts/backup.sh
 ## Проверка восстановления
 
 Проверка поднимает изолированный временный PostgreSQL 17 на `tmpfs`, восстанавливает архив,
-проверяет точный Alembic revision `0010_hardening_queue_state` и наличие не менее 24 публичных
+проверяет точный Alembic revision `0011_groq_shared_quota` и наличие не менее 26 публичных
 таблиц, затем всегда удаляет контейнер. Production database и её volume не изменяются.
 
 Последний архив из `BACKUP_DIR`:
@@ -105,10 +105,17 @@ BACKUP_DIR=/var/backups/terricon-events-bot ./scripts/restore-smoke.sh
 Значения старых `OPENAI_*` больше не используются. Ключи между провайдерами несовместимы.
 На Free цены токенов нулевые; при платном тарифе задать реальные цены для учёта бюджета.
 
-Новой SQL-миграции для SDK не требуется: ledger и enum сохраняют прежние физические
-имена. Переход не требует очистки таблиц или volume. Использовать обычный порядок
+Для SDK (этап9) миграция не требовалась: ledger/enum сохраняют прежние SQL-имена.
+Этап10 добавляет `0011_groq_shared_quota` с двумя таблицами общих квот. Перед новым
+preflight выполнить upgrade head; очистка таблиц/volume не нужна. Сверить новые
+`GROQ_RPM/RPD/TPM/TPD` и общий `GROQ_QUOTA_SCOPE` с `.env.example`; значения должны
+оставлять запас относительно реальных organization limits. Usage неизвестного
+вызова сохраняет полный token reserve до истечения окна. Сброс quota-таблиц или
+смена scope при рестарте обходят ограничения и для штатной эксплуатации не нужны.
+Использовать обычный порядок
 backup/build/migrate/preflight; сам production restart выполняется отдельно.
-Проверка от 2026-10-21: [Groq smoke](groq-smoke-2026-10-21.md).
+Проверки: [этап9 smoke](groq-smoke-2026-10-21.md),
+[этап10 и общие квоты](groq-stage10-2026-10-21.md).
 
 ## Beta и public mode
 

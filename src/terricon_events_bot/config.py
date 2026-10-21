@@ -80,6 +80,17 @@ class Settings(BaseSettings):
         allow_inf_nan=False,
         validation_alias="GROQ_TIMEOUT_SECONDS",
     )
+    groq_rpm: int = Field(default=24, ge=1, le=1_000_000, validation_alias="GROQ_RPM")
+    groq_rpd: int = Field(default=800, ge=1, le=1_000_000_000, validation_alias="GROQ_RPD")
+    groq_tpm: int = Field(default=6400, ge=1, le=1_000_000_000, validation_alias="GROQ_TPM")
+    groq_tpd: int = Field(default=160000, ge=1, le=1_000_000_000, validation_alias="GROQ_TPD")
+    groq_quota_scope: str = Field(
+        default="groq:default",
+        min_length=1,
+        max_length=128,
+        validation_alias="GROQ_QUOTA_SCOPE",
+        pattern=r"^\S(?:.*\S)?$",
+    )
     database_url: SecretStr = Field(min_length=1, validation_alias="DATABASE_URL")
     admin_telegram_ids: TelegramIds = Field(repr=False, validation_alias="ADMIN_TELEGRAM_IDS")
     admin_chat_id: int | None = Field(default=None, validation_alias="ADMIN_CHAT_ID")

@@ -61,6 +61,7 @@ class TranslationOutput(_StrictModel):
 class AIUsageData:
     input_tokens: int
     output_tokens: int
+    reasoning_tokens: int = 0
 
     def __post_init__(self) -> None:
         if (
@@ -70,6 +71,9 @@ class AIUsageData:
             or not isinstance(self.output_tokens, int)
             or isinstance(self.output_tokens, bool)
             or self.output_tokens < 0
+            or not isinstance(self.reasoning_tokens, int)
+            or isinstance(self.reasoning_tokens, bool)
+            or not 0 <= self.reasoning_tokens <= self.output_tokens
         ):
             raise ValueError("AI token counts must be nonnegative integers")
 

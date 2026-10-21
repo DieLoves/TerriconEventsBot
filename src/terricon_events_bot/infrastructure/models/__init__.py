@@ -1,3 +1,4 @@
+from terricon_events_bot.infrastructure.models.ai_quota import AIQuotaReservation, AIQuotaState
 from terricon_events_bot.infrastructure.models.broadcast import (
     Broadcast,
     BroadcastDelivery,
@@ -38,6 +39,8 @@ from terricon_events_bot.infrastructure.models.sync import (
 )
 
 __all__ = [
+    "AIQuotaReservation",
+    "AIQuotaState",
     "AIUsage",
     "AdminAlert",
     "AppHeartbeat",

@@ -1,0 +1,55 @@
+{
+  "behavior_sha256": "638797279aced04b6c753097459e46c3004ed1821e972956ae32c13929cfa64b",
+  "started_at": "2026-10-21T17:44:26.325497+00:00",
+  "results": [
+    {
+      "id": "real-2978-ru-translation-v4",
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "Разработка Telegram-бота на языке программирования Python",
+        "description": "- Знакомство с Telegram Bot API\n- Основы разработки на Python\n- Практические примеры и советы",
+        "audience": "Junior разработчики, студенты IT-специальностей",
+        "speaker": "Дильназ Мустафина"
+      },
+      "output": {
+        "title": "Python бағдарламалау тілінде Telegram-ботты әзірлеу",
+        "description": "- Telegram Bot API-мен танысу\n- Python-да әзірлеудің негіздері\n- Практикалық мысалдар және кеңестер",
+        "audience": "Junior әзірлеушілер, IT мамандықтарының студенттері",
+        "speaker": "Дильназ Мустафина"
+      },
+      "usage": {
+        "input_tokens": 323,
+        "output_tokens": 116,
+        "reasoning_tokens": 12
+      },
+      "duration_ms": 902,
+      "speaker_preserved": true
+    },
+    {
+      "id": "real-2978-kz-translation-v4",
+      "source": {
+        "source_locale": "kz",
+        "target_locale": "ru",
+        "title": "Python бағдарламалау тілінде телеграм-бот әзірлеу",
+        "description": "- Telegram Bot API-мен танысу\n- Python-да әзірлеу негіздері\n- Практикалық мысалдар мен кеңестер",
+        "audience": "Junior әзірлеушілеріне, IT мамандықтарында оқып жүрген студенттерге",
+        "speaker": "Дильназ Мустафина"
+      },
+      "output": {
+        "title": "Разработка телеграм-бота на языке программирования Python",
+        "description": "- Знакомство с Telegram Bot API\n- Основы разработки на Python\n- Практические примеры и советы",
+        "audience": "Младшим разработчикам, студентам, обучающимся по ИТ-специальностям",
+        "speaker": "Дильназ Мустафина"
+      },
+      "usage": {
+        "input_tokens": 341,
+        "output_tokens": 293,
+        "reasoning_tokens": 187
+      },
+      "duration_ms": 718,
+      "speaker_preserved": true
+    }
+  ],
+  "finished_at": "2026-10-21T17:45:51.651310+00:00"
+}

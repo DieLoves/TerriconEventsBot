@@ -118,7 +118,13 @@ async def test_translation_uses_required_nullable_fields(
 
     adapter = GroqEventAdapter(client_factory(respond), MODEL)
     result = await adapter.translate_missing_locale(
-        TranslationInput(source_locale=Locale.RU, target_locale=Locale.KZ, title="Python meetup")
+        TranslationInput(
+            source_locale=Locale.RU,
+            target_locale=Locale.KZ,
+            title="Python meetup",
+            description=translated["description"],
+            speaker="Ada",
+        )
     )
 
     assert result.output.model_dump() == translated
@@ -237,3 +243,143 @@ async def test_malformed_envelope_is_a_safe_error_with_usage(
         await adapter.classify_event(event_input)
     assert caught.value.usage is not None
     assert caught.value.usage.input_tokens == 120
+
+
+async def test_quota_is_reserved_before_http_and_settled_for_both_operations(
+    client_factory, event_input
+):
+    from uuid import uuid4
+
+    calls = []
+    reservation_id = uuid4()
+
+    class Quota:
+        async def reserve(self, tokens):
+            calls.append(("reserve", tokens))
+            return reservation_id
+
+        async def settle(self, identifier, usage, headers, **kwargs):
+            assert identifier == reservation_id
+            calls.append(("settle", usage, dict(headers), kwargs))
+
+    def respond(request):
+        calls.append(("http",))
+        body = json.loads(request.content)
+        is_translation = body["response_format"]["json_schema"]["name"] == "TranslationOutput"
+        content = (
+            json.dumps({"title": "Test", "description": None, "audience": None, "speaker": None})
+            if is_translation
+            else '{"categories":["development_it"]}'
+        )
+        return httpx.Response(
+            200, json=completion(content), headers={"x-ratelimit-remaining-tokens": "7"}
+        )
+
+    adapter = GroqEventAdapter(client_factory(respond), MODEL, quota=Quota())
+    await adapter.classify_event(event_input)
+    await adapter.translate_missing_locale(
+        TranslationInput(source_locale=Locale.KZ, target_locale=Locale.RU, title="Test")
+    )
+    assert [x[0] for x in calls] == ["reserve", "http", "settle"] * 2
+    assert calls[0][1] > 512
+    assert calls[3][1] > 2048
+    assert calls[2][1].output_tokens == 8
+    assert calls[2][2]["x-ratelimit-remaining-tokens"] == "7"
+
+
+async def test_denied_quota_never_calls_http(client_factory, event_input):
+    class Quota:
+        async def reserve(self, tokens):
+            raise AIAdapterError("rate_limit", retry_after_seconds=60)
+
+        async def settle(self, *args, **kwargs):
+            pytest.fail("No reservation was made")
+
+    def unexpected(_):
+        pytest.fail("Quota denied but HTTP was called")
+
+    adapter = GroqEventAdapter(client_factory(unexpected), MODEL, quota=Quota())
+    with pytest.raises(AIAdapterError, match="rate_limit"):
+        await adapter.classify_event(event_input)
+
+
+async def test_rate_limit_is_persisted_for_other_processes(client_factory, event_input):
+    from uuid import uuid4
+
+    settled = []
+
+    class Quota:
+        async def reserve(self, tokens):
+            return uuid4()
+
+        async def settle(self, identifier, usage, headers, **kwargs):
+            settled.append((usage, dict(headers), kwargs))
+
+    adapter = GroqEventAdapter(
+        client_factory(
+            lambda _: httpx.Response(
+                429, json={"error": {"message": "limited"}}, headers={"retry-after": "3600"}
+            )
+        ),
+        MODEL,
+        quota=Quota(),
+    )
+    with pytest.raises(AIAdapterError, match="rate_limit"):
+        await adapter.classify_event(event_input)
+    assert settled[0][0] is None
+    assert settled[0][2]["retry_after_seconds"] == 3600
+
+
+async def test_reasoning_tokens_are_measured(client_factory, event_input):
+    body = completion()
+    body["usage"]["completion_tokens_details"] = {"reasoning_tokens": 3}
+    adapter = GroqEventAdapter(client_factory(lambda _: httpx.Response(200, json=body)), MODEL)
+    result = await adapter.classify_event(event_input)
+    assert result.usage.reasoning_tokens == 3
+
+
+async def test_provider_json_validation_failure_is_safe_invalid_output(client_factory, event_input):
+    client = client_factory(
+        lambda _: httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "json_validate_failed",
+                    "type": "invalid_request_error",
+                    "failed_generation": "private event text",
+                    "message": "private event text",
+                },
+            },
+        )
+    )
+    adapter = GroqEventAdapter(client, MODEL)
+    with pytest.raises(AIAdapterError) as caught:
+        await adapter.classify_event(event_input)
+    assert caught.value.code == "invalid_output"
+    assert "private" not in str(caught.value)
+
+
+@pytest.mark.parametrize("speaker", ["Дильназ Мустафина", None])
+async def test_translation_cannot_change_speaker_or_invent_null_fields(client_factory, speaker):
+    output = {
+        "title": "Python",
+        "description": "Invented",
+        "audience": "Invented",
+        "speaker": "Changed name",
+    }
+    adapter = GroqEventAdapter(
+        client_factory(lambda _: httpx.Response(200, json=completion(json.dumps(output)))), MODEL
+    )
+    result = await adapter.translate_missing_locale(
+        TranslationInput(
+            source_locale=Locale.RU,
+            target_locale=Locale.KZ,
+            title="Python",
+            description=None,
+            audience=None,
+            speaker=speaker,
+        )
+    )
+    assert result.output.speaker == speaker
+    assert result.output.description is None
+    assert result.output.audience is None

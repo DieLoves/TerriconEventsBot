@@ -30,6 +30,7 @@ from terricon_events_bot.application.sync import SyncService
 from terricon_events_bot.application.users import UserService
 from terricon_events_bot.config import Settings
 from terricon_events_bot.domain.enums import AccessMode
+from terricon_events_bot.infrastructure.ai_quota import PostgresAIQuota, QuotaLimits
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
 from terricon_events_bot.infrastructure.groq_adapter import GroqEventAdapter
@@ -113,7 +114,15 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         timeout=settings.groq_timeout_seconds,
         max_retries=0,
     )
-    groq_adapter = GroqEventAdapter(groq_client, settings.groq_model)
+    groq_adapter = GroqEventAdapter(
+        groq_client,
+        settings.groq_model,
+        quota=PostgresAIQuota(
+            session_factory,
+            settings.groq_quota_scope,
+            QuotaLimits(settings.groq_rpm, settings.groq_rpd, settings.groq_tpm, settings.groq_tpd),
+        ),
+    )
     classification_worker = ClassificationWorker(
         session_factory,
         groq_adapter,

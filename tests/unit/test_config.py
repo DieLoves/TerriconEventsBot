@@ -119,3 +119,25 @@ def test_secret_representation_does_not_reveal_values() -> None:
     assert "user:pass" not in representation
     assert "100001" not in representation
     assert "100003" not in representation
+
+
+def test_shared_groq_quotas_have_conservative_defaults_and_validate():
+    settings = Settings(_env_file=None, **valid_values())
+    assert (settings.groq_rpm, settings.groq_rpd, settings.groq_tpm, settings.groq_tpd) == (
+        24,
+        800,
+        6400,
+        160000,
+    )
+    assert settings.groq_quota_scope == "groq:default"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("GROQ_RPM", 0), ("GROQ_TPM", -1), ("GROQ_RPD", 0), ("GROQ_TPD", 0), ("GROQ_QUOTA_SCOPE", "")],
+)
+def test_invalid_quotas_are_rejected(name, value):
+    values = valid_values()
+    values[name] = value
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **values)

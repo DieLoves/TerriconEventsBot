@@ -1,0 +1,780 @@
+{
+  "started_at": "2026-10-21T17:26:27.176466+00:00",
+  "model": "openai/gpt-oss-120b",
+  "dataset_sha256": "fd6a1070163760c22afaa2da31811c87f036beea69c2e3496fc32efe64516370",
+  "results": [
+    {
+      "id": "real-2978",
+      "usage": {
+        "input_tokens": 341,
+        "output_tokens": 61,
+        "reasoning_tokens": 34
+      },
+      "duration_ms": 676,
+      "output": {
+        "categories": [
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-3184",
+      "usage": {
+        "input_tokens": 366,
+        "output_tokens": 57,
+        "reasoning_tokens": 30
+      },
+      "duration_ms": 517,
+      "output": {
+        "categories": [
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-13056",
+      "usage": {
+        "input_tokens": 460,
+        "output_tokens": 75,
+        "reasoning_tokens": 48
+      },
+      "duration_ms": 1589,
+      "output": {
+        "categories": [
+          "ai_data",
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-1308",
+      "usage": {
+        "input_tokens": 385,
+        "output_tokens": 110,
+        "reasoning_tokens": 77
+      },
+      "duration_ms": 352,
+      "output": {
+        "categories": [
+          "ai_data",
+          "startups_products"
+        ]
+      },
+      "score": {
+        "passed": false,
+        "missing": [],
+        "unexpected": [
+          "startups_products"
+        ]
+      }
+    },
+    {
+      "id": "real-6182",
+      "usage": {
+        "input_tokens": 423,
+        "output_tokens": 77,
+        "reasoning_tokens": 44
+      },
+      "duration_ms": 554,
+      "output": {
+        "categories": [
+          "business_finance",
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-13980",
+      "usage": {
+        "input_tokens": 530,
+        "output_tokens": 91,
+        "reasoning_tokens": 53
+      },
+      "duration_ms": 512,
+      "output": {
+        "categories": [
+          "ai_data",
+          "development_it",
+          "startups_products"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-17724",
+      "usage": {
+        "input_tokens": 378,
+        "output_tokens": 81,
+        "reasoning_tokens": 49
+      },
+      "duration_ms": 946,
+      "output": {
+        "categories": [
+          "ai_data",
+          "startups_products"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-26536",
+      "usage": {
+        "input_tokens": 409,
+        "output_tokens": 91,
+        "reasoning_tokens": 53
+      },
+      "duration_ms": 622,
+      "output": {
+        "categories": [
+          "startups_products",
+          "ai_data",
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": false,
+        "missing": [],
+        "unexpected": [
+          "development_it"
+        ]
+      }
+    },
+    {
+      "id": "real-362",
+      "usage": {
+        "input_tokens": 523,
+        "output_tokens": 118,
+        "reasoning_tokens": 96
+      },
+      "duration_ms": 686,
+      "output": {
+        "categories": [
+          "ai_data"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-26360",
+      "error": "http_400"
+    },
+    {
+      "id": "real-28234",
+      "usage": {
+        "input_tokens": 387,
+        "output_tokens": 73,
+        "reasoning_tokens": 41
+      },
+      "duration_ms": 318,
+      "output": {
+        "categories": [
+          "business_finance"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-1282",
+      "usage": {
+        "input_tokens": 466,
+        "output_tokens": 96,
+        "reasoning_tokens": 56
+      },
+      "duration_ms": 312,
+      "output": {
+        "categories": [
+          "startups_products",
+          "design_creative",
+          "business_finance"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-3602",
+      "error": "http_400"
+    },
+    {
+      "id": "real-368",
+      "usage": {
+        "input_tokens": 389,
+        "output_tokens": 50,
+        "reasoning_tokens": 27
+      },
+      "duration_ms": 322,
+      "output": {
+        "categories": [
+          "design_creative"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-4960",
+      "usage": {
+        "input_tokens": 470,
+        "output_tokens": 65,
+        "reasoning_tokens": 41
+      },
+      "duration_ms": 682,
+      "output": {
+        "categories": [
+          "design_creative"
+        ]
+      },
+      "score": {
+        "passed": false,
+        "missing": [
+          "ai_data"
+        ],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-13978",
+      "usage": {
+        "input_tokens": 356,
+        "output_tokens": 72,
+        "reasoning_tokens": 45
+      },
+      "duration_ms": 493,
+      "output": {
+        "categories": [
+          "design_creative"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-28734",
+      "usage": {
+        "input_tokens": 381,
+        "output_tokens": 54,
+        "reasoning_tokens": 34
+      },
+      "duration_ms": 404,
+      "output": {
+        "categories": [
+          "marketing_sales"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-3710",
+      "usage": {
+        "input_tokens": 477,
+        "output_tokens": 50,
+        "reasoning_tokens": 28
+      },
+      "duration_ms": 303,
+      "output": {
+        "categories": [
+          "marketing_sales"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-11806",
+      "usage": {
+        "input_tokens": 379,
+        "output_tokens": 71,
+        "reasoning_tokens": 46
+      },
+      "duration_ms": 488,
+      "output": {
+        "categories": [
+          "soft_skills_languages"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-2982",
+      "usage": {
+        "input_tokens": 391,
+        "output_tokens": 101,
+        "reasoning_tokens": 68
+      },
+      "duration_ms": 818,
+      "output": {
+        "categories": [
+          "development_it",
+          "soft_skills_languages"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-27458",
+      "usage": {
+        "input_tokens": 463,
+        "output_tokens": 100,
+        "reasoning_tokens": 64
+      },
+      "duration_ms": 440,
+      "output": {
+        "categories": [
+          "soft_skills_languages",
+          "career_education_hr"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-9698",
+      "usage": {
+        "input_tokens": 468,
+        "output_tokens": 76,
+        "reasoning_tokens": 51
+      },
+      "duration_ms": 1186,
+      "output": {
+        "categories": [
+          "career_education_hr"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-1480",
+      "usage": {
+        "input_tokens": 410,
+        "output_tokens": 103,
+        "reasoning_tokens": 75
+      },
+      "duration_ms": 709,
+      "output": {
+        "categories": [
+          "business_finance"
+        ]
+      },
+      "score": {
+        "passed": false,
+        "missing": [
+          "other"
+        ],
+        "unexpected": [
+          "business_finance"
+        ]
+      }
+    },
+    {
+      "id": "real-30968",
+      "usage": {
+        "input_tokens": 477,
+        "output_tokens": 67,
+        "reasoning_tokens": 43
+      },
+      "duration_ms": 581,
+      "output": {
+        "categories": [
+          "business_finance"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-2978-ru-translation",
+      "usage": {
+        "input_tokens": 323,
+        "output_tokens": 105,
+        "reasoning_tokens": 12
+      },
+      "duration_ms": 718,
+      "output": {
+        "title": "Python бағдарламалау тілінде Telegram-ботты әзірлеу",
+        "description": "- Telegram Bot API-мен танысу\n- Python-да әзірлеу негіздері\n- Практикалық мысалдар және кеңестер",
+        "audience": "Junior әзірлеушілер, IT-мамандандығы студенттері",
+        "speaker": "Дильназ Мұстафина"
+      },
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "Разработка Telegram-бота на языке программирования Python",
+        "description": "- Знакомство с Telegram Bot API\n- Основы разработки на Python\n- Практические примеры и советы",
+        "audience": "Junior разработчики, студенты IT-специальностей",
+        "speaker": "Дильназ Мустафина"
+      }
+    },
+    {
+      "id": "real-2978-kz-translation",
+      "usage": {
+        "input_tokens": 341,
+        "output_tokens": 159,
+        "reasoning_tokens": 56
+      },
+      "duration_ms": 510,
+      "output": {
+        "title": "Разработка телеграм-бота на языке программирования Python",
+        "description": "- Знакомство с Telegram Bot API\n- Основы разработки на Python\n- Практические примеры и советы",
+        "audience": "Для младших разработчиков, студентов, обучающихся по ИТ-специальностям",
+        "speaker": "Дильназ Мустафина"
+      },
+      "source": {
+        "source_locale": "kz",
+        "target_locale": "ru",
+        "title": "Python бағдарламалау тілінде телеграм-бот әзірлеу",
+        "description": "- Telegram Bot API-мен танысу\n- Python-да әзірлеу негіздері\n- Практикалық мысалдар мен кеңестер",
+        "audience": "Junior әзірлеушілеріне, IT мамандықтарында оқып жүрген студенттерге",
+        "speaker": "Дильназ Мустафина"
+      }
+    },
+    {
+      "id": "real-3184-ru-translation",
+      "usage": {
+        "input_tokens": 332,
+        "output_tokens": 313,
+        "reasoning_tokens": 221
+      },
+      "duration_ms": 829,
+      "output": {
+        "title": "GitOps практикада AWS EKS пен Flux & ArgoCD мысалында",
+        "description": "- GitOps артықшылықтары\n- GitOps арқылы CI/CD орнату\n- Операциялар мен әзірлеуді біріктіру",
+        "audience": "студенттер, бағдарламашылар, DevOps мамандары",
+        "speaker": "Алина Шедрикс"
+      },
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "GitOps на практике на примере AWS EKS с Flux & ArgoCD",
+        "description": "- Преимущества GitOps\n- Настройка CI/CD с помощью GitOps\n- Объединение операций и разработки",
+        "audience": "студенты, программисты, Devops-специалисты",
+        "speaker": "Алина Шедрикс"
+      }
+    }
+  ],
+  "headers": [
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "999",
+      "x-ratelimit-remaining-tokens": "7368",
+      "x-ratelimit-reset-requests": "1m26.4s",
+      "x-ratelimit-reset-tokens": "4.74s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "998",
+      "x-ratelimit-remaining-tokens": "7573",
+      "x-ratelimit-reset-requests": "2m52.8s",
+      "x-ratelimit-reset-tokens": "3.202s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "997",
+      "x-ratelimit-remaining-tokens": "7279",
+      "x-ratelimit-reset-requests": "4m19.2s",
+      "x-ratelimit-reset-tokens": "5.407s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "996",
+      "x-ratelimit-remaining-tokens": "7554",
+      "x-ratelimit-reset-requests": "5m45.6s",
+      "x-ratelimit-reset-tokens": "3.345s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "995",
+      "x-ratelimit-remaining-tokens": "7502",
+      "x-ratelimit-reset-requests": "7m12s",
+      "x-ratelimit-reset-tokens": "3.735s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "994",
+      "x-ratelimit-remaining-tokens": "7171",
+      "x-ratelimit-reset-requests": "8m38.4s",
+      "x-ratelimit-reset-tokens": "6.217s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "993",
+      "x-ratelimit-remaining-tokens": "7334",
+      "x-ratelimit-reset-requests": "10m4.8s",
+      "x-ratelimit-reset-tokens": "4.995s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "992",
+      "x-ratelimit-remaining-tokens": "7481",
+      "x-ratelimit-reset-requests": "11m31.2s",
+      "x-ratelimit-reset-tokens": "3.892s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "991",
+      "x-ratelimit-remaining-tokens": "7396",
+      "x-ratelimit-reset-requests": "12m57.599s",
+      "x-ratelimit-reset-tokens": "4.53s"
+    },
+    {
+      "status": 400,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "990",
+      "x-ratelimit-remaining-tokens": "7528",
+      "x-ratelimit-reset-requests": "14m24s",
+      "x-ratelimit-reset-tokens": "3.54s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "989",
+      "x-ratelimit-remaining-tokens": "7522",
+      "x-ratelimit-reset-requests": "15m50.4s",
+      "x-ratelimit-reset-tokens": "3.585s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "988",
+      "x-ratelimit-remaining-tokens": "7338",
+      "x-ratelimit-reset-requests": "17m16.8s",
+      "x-ratelimit-reset-tokens": "4.965s"
+    },
+    {
+      "status": 400,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "987",
+      "x-ratelimit-remaining-tokens": "7535",
+      "x-ratelimit-reset-requests": "18m43.2s",
+      "x-ratelimit-reset-tokens": "3.487s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "986",
+      "x-ratelimit-remaining-tokens": "7493",
+      "x-ratelimit-reset-requests": "20m9.6s",
+      "x-ratelimit-reset-tokens": "3.802s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "985",
+      "x-ratelimit-remaining-tokens": "7439",
+      "x-ratelimit-reset-requests": "21m36s",
+      "x-ratelimit-reset-tokens": "4.207s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "984",
+      "x-ratelimit-remaining-tokens": "7553",
+      "x-ratelimit-reset-requests": "23m2.4s",
+      "x-ratelimit-reset-tokens": "3.352s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "983",
+      "x-ratelimit-remaining-tokens": "7504",
+      "x-ratelimit-reset-requests": "24m28.8s",
+      "x-ratelimit-reset-tokens": "3.719s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "982",
+      "x-ratelimit-remaining-tokens": "7413",
+      "x-ratelimit-reset-requests": "25m55.199s",
+      "x-ratelimit-reset-tokens": "4.402s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "981",
+      "x-ratelimit-remaining-tokens": "7371",
+      "x-ratelimit-reset-requests": "27m21.6s",
+      "x-ratelimit-reset-tokens": "4.717s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "980",
+      "x-ratelimit-remaining-tokens": "7491",
+      "x-ratelimit-reset-requests": "28m48s",
+      "x-ratelimit-reset-tokens": "3.817s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "979",
+      "x-ratelimit-remaining-tokens": "7419",
+      "x-ratelimit-reset-requests": "30m14.4s",
+      "x-ratelimit-reset-tokens": "4.357s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "978",
+      "x-ratelimit-remaining-tokens": "7422",
+      "x-ratelimit-reset-requests": "31m40.8s",
+      "x-ratelimit-reset-tokens": "4.335s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "977",
+      "x-ratelimit-remaining-tokens": "7472",
+      "x-ratelimit-reset-requests": "33m7.2s",
+      "x-ratelimit-reset-tokens": "3.96s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "976",
+      "x-ratelimit-remaining-tokens": "7413",
+      "x-ratelimit-reset-requests": "34m33.6s",
+      "x-ratelimit-reset-tokens": "4.402s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "975",
+      "x-ratelimit-remaining-tokens": "7567",
+      "x-ratelimit-reset-requests": "36m0s",
+      "x-ratelimit-reset-tokens": "3.247s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "974",
+      "x-ratelimit-remaining-tokens": "7549",
+      "x-ratelimit-reset-requests": "37m26.4s",
+      "x-ratelimit-reset-tokens": "3.382s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "973",
+      "x-ratelimit-remaining-tokens": "7577",
+      "x-ratelimit-reset-requests": "38m52.8s",
+      "x-ratelimit-reset-tokens": "3.172s"
+    }
+  ],
+  "note": "Agent labels frozen before inference; translation semantic review is separate.",
+  "stopped_at": "2026-10-21T17:35:23.317932+00:00",
+  "stopped_reason": "Baseline 24 classification cases complete. Stop remaining v2 translations/edges to apply measured prompt/output tuning; full acceptance follows in a separate v3 report.",
+  "prompt_versions": [
+    "classification-v2-groq",
+    "translation-v2-groq"
+  ],
+  "output_limits": [
+    2048,
+    4096
+  ]
+}

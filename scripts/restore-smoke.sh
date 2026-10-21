@@ -10,8 +10,8 @@ readonly RESTORE_TMPFS_SIZE="${RESTORE_TMPFS_SIZE:-1g}"
 readonly RESTORE_USER="restore_smoke"
 readonly RESTORE_DB="restore_smoke"
 readonly RESTORE_PASSWORD="restore-smoke-only"
-readonly EXPECTED_SCHEMA_REVISION="${EXPECTED_SCHEMA_REVISION:-0010_hardening_queue_state}"
-readonly MIN_PUBLIC_TABLES="${MIN_PUBLIC_TABLES:-24}"
+readonly EXPECTED_SCHEMA_REVISION="${EXPECTED_SCHEMA_REVISION:-0011_groq_shared_quota}"
+readonly MIN_PUBLIC_TABLES="${MIN_PUBLIC_TABLES:-26}"
 
 if [[ ! "$MIN_PUBLIC_TABLES" =~ ^[1-9][0-9]*$ ]]; then
     printf 'Restore smoke failed: MIN_PUBLIC_TABLES must be a positive integer.\n' >&2

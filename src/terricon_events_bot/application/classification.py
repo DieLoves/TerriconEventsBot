@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -187,6 +187,17 @@ class ClassificationWorker:
                             ),
                         )
                         .order_by(
+                            case(
+                                (
+                                    func.coalesce(
+                                        EventClassification.first_attempt_at,
+                                        EventClassification.created_at,
+                                    )
+                                    <= now - _FALLBACK_AFTER,
+                                    0,
+                                ),
+                                else_=1,
+                            ),
                             EventClassification.next_attempt_at.asc().nullsfirst(),
                             EventClassification.event_id,
                         )
@@ -325,7 +336,7 @@ class ClassificationWorker:
                 if classification is None:  # pragma: no cover - narrowed by _matches_job
                     raise RuntimeError("Matched classification disappeared")
                 if classification.first_attempt_at is None:
-                    classification.first_attempt_at = now
+                    classification.first_attempt_at = classification.created_at
                 if attempted:
                     classification.attempts += 1
                 if usage is not None and cost is not None:

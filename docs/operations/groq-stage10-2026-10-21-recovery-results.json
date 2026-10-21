@@ -1,0 +1,46 @@
+{
+  "started_at": "2026-10-21T17:42:44.356922+00:00",
+  "model": "openai/gpt-oss-120b",
+  "dataset_sha256": "fd6a1070163760c22afaa2da31811c87f036beea69c2e3496fc32efe64516370",
+  "behavior_sha256": "28227e1cf6b2697fab65f889a3a517eb26ff37fc1bd168309414fbd15bc661db",
+  "results": [
+    {
+      "id": "real-2982",
+      "usage": {
+        "input_tokens": 570,
+        "output_tokens": 96,
+        "reasoning_tokens": 71
+      },
+      "duration_ms": 649,
+      "output": {
+        "categories": [
+          "soft_skills_languages"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    }
+  ],
+  "headers": [
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "943",
+      "x-ratelimit-remaining-tokens": "7117",
+      "x-ratelimit-reset-requests": "1h22m4.8s",
+      "x-ratelimit-reset-tokens": "6.622s"
+    }
+  ],
+  "note": "Agent labels frozen before inference; translation semantic review is separate.",
+  "selection": {
+    "case_ids": [
+      "real-2982"
+    ],
+    "classification_only": true
+  },
+  "finished_at": "2026-10-21T17:42:47.662500+00:00"
+}

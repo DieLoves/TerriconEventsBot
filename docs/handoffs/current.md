@@ -1,34 +1,77 @@
 # Handoff
 
-## Groq — текущее дополнение 2026-10-21
+## Текущий статус — этап 10, 2026-10-21
 
-Этап 9 завершён и опубликован: `openai` SDK полностью удалён; используется `groq==0.37.1`,
-`AsyncGroq`/Chat Completions и `openai/gpt-oss-120b`, strict JSON Schema + Pydantic.
-Все AI-настройки теперь `GROQ_*`; цены Free по умолчанию 0/0, usage сохраняется.
-Физические SQL-имена `openai_usage`/`openai_operation` сохранены для совместимости;
-новых миграций не требуется. Runtime и admin используют нейтральные AI-типы.
+**Техническая часть и инструментальная приёмка выполнены. Языковая часть KZ открыта.**
+Работа по `docs/specs/groq-migration.md` и `docs/plans/groq-migration.md`.
+Полный отчёт: [Groq этап 10](../operations/groq-stage10-2026-10-21.md).
 
-`Retry-After` сохраняется в очереди; 429 останавливает batch. Перевод имеет durable
-retry/lease на completed classification и восстанавливается без переклассификации
-и дублей уведомлений. Официальная локаль и 24-часовой deadline прекращают retry.
-Malformed ответы нормализуются, SDK debug dumps исключены из application logs.
+- PostgreSQL guard до HTTP: общие RPM/TPM/RPD/TPD классификации и перевода,
+  rolling 60 с / 24 ч, атомарные резервы, actual usage reconciliation, unknown reserves,
+  account headers с учётом in-flight requests и durable 429 cooldown.
+- Новая миграция **0011_groq_shared_quota**, две quota-таблицы. Usage ledger и его
+  прежние физические SQL-имена сохранены. Runtime preflight/restore обновлены до 0011.
+- Defaults: `GROQ_RPM=24`, `GROQ_RPD=800`, `GROQ_TPM=6400`, `GROQ_TPD=160000`,
+  общий `GROQ_QUOTA_SCOPE=groq:default`. Account RPD 1000 / TPM 8000 подтверждены headers;
+  RPM 30 / TPD 200000 пользователь сверил на странице Limits. Запас 20% не гарантирует
+  доступность при произвольном расходе других приложений организации.
+- Classification prompt v3 определяет категории по предмету, а не аудитории.
+  Output allowance 512/2048 подобран по измерениям, reasoning учтён внутри output.
+  `json_validate_failed` безопасно преобразуется в `invalid_output` для retry.
+- Translation v4 точно сохраняет speaker и исходные null description/audience/speaker.
+  Свободный текст описания всё ещё требует языковой проверки: замечено изменение
+  написания имени внутри description, не устранённое копированием speaker.
+- Queue fallback 24 h имеет приоритет перед свежими quota denials. Первое ожидание
+  квоты не перезапускает срок queued задачи. Initial import 30 jobs, recovery/fallback
+  и настоящий restart отдельной PostgreSQL проверены.
 
-Финальный gate: **235 passed** с отдельной PostgreSQL 17; Ruff/format/mypy/lock/diff,
-package build и Docker build PASS. В venv и проверочном Docker-образе OpenAI SDK
-отсутствует. Независимое review выявило 3 Important; все воспроизведены и исправлены,
-после чего suite повторён; повторное независимое review не выполнялось.
+## Живая приёмка
 
-С разрешения пользователя выполнены 3 реальных Groq-запроса: RU/KZ classification,
-RU → KZ translation, HTTP 200, 1230 токенов, 334–607 мс. Ключ вводился скрыто только
-в процесс и не сохранялся. `.env` не менялся. Для запуска отдельно настроить
-`GROQ_API_KEY`; старые `OPENAI_*` не используются. Бот не запускался.
+- Terricon API: 6/6 endpoint, 208 событий на локаль, invalid 0. Сохранены 24 реальных
+  события с метками **до inference**, RU-only/KZ-only/bilingual по 8 случаев. Автор
+  разметки — агент; независимая человеческая gold-оценка не заявляется.
+- Baseline v2: 18/24; четыре семантических расхождения и два HTTP 400. Сохранён отдельно.
+- V3: 23/24 с первой попытки, все 23 успешных ответа совпали с метками; один provider
+  `json_validate_failed`. Отдельный recovery дал 24/24 после одного повтора. Исходный
+  отказ сохранён, не считается успехом с первой попытки.
+- RU↔KZ: 8/8 валидных ответов, включая самый длинный реальный кейс; 5/5 synthetic edges
+  (instructions, long, null, URL/newline). После находки speaker сделан translation v4:
+  два живых направления и unit RED→GREEN подтвердили точное сохранение поля.
+- Median/p95 classification: 523/723 мс, translation: 766,5/1973 мс. За текущие 67 запросов
+  известный usage 64 ответов: 30557 input + 7392 output = 37949 tokens; reasoning 4254 внутри
+  output. У трёх HTTP 400 usage неизвестен, резерв сохранён. Реальный 429 не провоцировался.
+- По измеренному среднему импорт 208 с обеими официальными локалями оценивается
+  примерно в 140300 токенов; это прогноз, не AI-прогон всего архива. Если 208 событиям
+  нужен перевод, суммарно около 279600 токенов — выше дневного Free. Free не объявлен
+  достаточным для произвольных повторных импортов/неизвестной внешней нагрузки.
 
-Этап 10 открыт: 20–30 размеченных реальных событий, оба направления перевода,
-полная проверка квот и общий throttling. Первые 3 synthetic smoke этого не заменяют.
-Истина: `docs/specs/groq-migration.md`, `docs/plans/groq-migration.md`,
-`docs/operations/groq-smoke-2026-10-21.md`. По запросу пользователя от 2026-10-21
-Groq и все прежние audit/operations-изменения опубликованы в `origin/main`.
-Статус публикации указан ниже; production rollout не выполнялся.
+## Проверки финального diff
+
+**266 passed** на отдельной PostgreSQL 17, без пропусков; Ruff/format 123 Python files,
+strict mypy 56 source files, offline lock, wheel/sdist, shell/diff — PASS.
+Docker `terricon-events-bot:stage10-test` пересобран после Python-исправлений,
+его preflight PASS с фиктивными внешними ключами на временной БД. Реальный restore
+подтвердил revision 0011 и 27 public tables; SQL после restore не менялся.
+
+Независимое read-only review нашло Important 1: headers не учитывали другие in-flight
+резервы. Два RED (tokens/requests) → GREEN; дополнительно исправлены starvation,
+сброс 24 h deadline, json_validate_failed и speaker/null. Последний полный suite 266 PASS.
+Review minors fingerprint/resume и oversized calibration учтены. Повторного
+независимого review после исправлений не было.
+
+## Текущее рабочее дерево и runtime
+
+- Этап 9 и прежние audits опубликованы в origin/main: code e175f15, docs 5c6c290.
+  Пользователь отдельно разрешил commit/push этапа 10 в существующий origin/main.
+  Изменения подготовлены к публикации; подтверждённая база — 5c6c290. Production
+  rollout не выполняется. Результат remote-проверки записывается после push.
+- Ключ, предоставленный пользователем для приёмки, вводился скрыто только в процессы,
+  в `.env`, код, отчёты или память не записан. `.env` не менялся.
+- Рабочая Compose-БД не менялась, миграция 0011 к ней не применялась; polling Terricon
+  не запускался. Нельзя запускать новый код на старой схеме без upgrade head.
+- Одноразовая PostgreSQL этапа 10 удалена после приёмки; проверочный Docker-образ
+  оставлен. Другие проекты/контейнеры не менялись. Ниже — историческая публикация
+  и исходные operations/audit результаты; актуальные изменения этапа 10 описаны выше.
 
 ## Objective (исходные этапы 1–8)
 
@@ -118,8 +161,9 @@ Docker/runtime и operations-документацией. Найденные comp
 
 - `locales/kz.yaml` намеренно содержит TODO-шаблоны и использует RU fallback в закрытой beta.
   Public mode остаётся заблокирован автоматической проверкой до пользовательской верификации KZ.
-- Реальные Telegram-вызовы не выполнялись. Groq: только smoke 3/3; полная живая
-  приёмка качества и квот этапа 10 ещё не выполнена.
+- Реальные Telegram-вызовы не выполнялись. Техническая приёмка Groq этапа 10
+  выполнена; независимая языковая проверка KZ и написания имён внутри description
+  остаётся открытой. Метрики и ограничения описаны в отчёте этапа 10.
 - Production rollout не выполнялся; для него нужны отдельное разрешение и доступ к VPS.
 
 ## Runtime state
@@ -133,6 +177,12 @@ Docker/runtime и operations-документацией. Найденные comp
 
 ## Next step
 
-Продолжить этап 10 по `docs/plans/groq-migration.md`: качество реальных событий,
-обратный KZ → RU перевод и общие квоты. Commit/push выполнены по запросу пользователя
-2026-10-21; production rollout требует отдельного поручения.
+Закрыть языковую часть этапа 10: независимая проверка KZ и решение о точном
+сохранении имён внутри свободного description (пример real-9698: Серикова→Серікова).
+Структурированное поле speaker уже сохраняется точно; метки 24 классификаций
+заморожены и после inference не менялись. Не расширять эвристику имён без проверки.
+
+Commit/push этапа 10 разрешён пользователем и выполняется отдельно от rollout.
+Production rollout требует отдельного поручения. Перед запуском: настроенный пользователем
+GROQ_API_KEY, обычный backup/build/migrate до 0011/preflight; не сбрасывать quota state
+и не менять scope при рестарте. Public KZ UI gate исходной спецификации сохраняется.

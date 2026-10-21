@@ -1,0 +1,1083 @@
+{
+  "started_at": "2026-10-21T17:35:50.839250+00:00",
+  "model": "openai/gpt-oss-120b",
+  "dataset_sha256": "fd6a1070163760c22afaa2da31811c87f036beea69c2e3496fc32efe64516370",
+  "behavior_sha256": "28227e1cf6b2697fab65f889a3a517eb26ff37fc1bd168309414fbd15bc661db",
+  "results": [
+    {
+      "id": "real-2978",
+      "usage": {
+        "input_tokens": 520,
+        "output_tokens": 59,
+        "reasoning_tokens": 36
+      },
+      "duration_ms": 550,
+      "output": {
+        "categories": [
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-3184",
+      "usage": {
+        "input_tokens": 545,
+        "output_tokens": 70,
+        "reasoning_tokens": 42
+      },
+      "duration_ms": 722,
+      "output": {
+        "categories": [
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-13056",
+      "usage": {
+        "input_tokens": 639,
+        "output_tokens": 92,
+        "reasoning_tokens": 69
+      },
+      "duration_ms": 615,
+      "output": {
+        "categories": [
+          "ai_data"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-1308",
+      "usage": {
+        "input_tokens": 564,
+        "output_tokens": 72,
+        "reasoning_tokens": 49
+      },
+      "duration_ms": 559,
+      "output": {
+        "categories": [
+          "ai_data"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-6182",
+      "usage": {
+        "input_tokens": 602,
+        "output_tokens": 89,
+        "reasoning_tokens": 56
+      },
+      "duration_ms": 636,
+      "output": {
+        "categories": [
+          "business_finance",
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-13980",
+      "usage": {
+        "input_tokens": 709,
+        "output_tokens": 106,
+        "reasoning_tokens": 68
+      },
+      "duration_ms": 418,
+      "output": {
+        "categories": [
+          "ai_data",
+          "startups_products",
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-17724",
+      "usage": {
+        "input_tokens": 557,
+        "output_tokens": 85,
+        "reasoning_tokens": 53
+      },
+      "duration_ms": 478,
+      "output": {
+        "categories": [
+          "ai_data",
+          "startups_products"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-26536",
+      "usage": {
+        "input_tokens": 588,
+        "output_tokens": 77,
+        "reasoning_tokens": 53
+      },
+      "duration_ms": 297,
+      "output": {
+        "categories": [
+          "startups_products",
+          "ai_data"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-362",
+      "usage": {
+        "input_tokens": 702,
+        "output_tokens": 101,
+        "reasoning_tokens": 74
+      },
+      "duration_ms": 356,
+      "output": {
+        "categories": [
+          "ai_data"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-26360",
+      "usage": {
+        "input_tokens": 560,
+        "output_tokens": 63,
+        "reasoning_tokens": 35
+      },
+      "duration_ms": 440,
+      "output": {
+        "categories": [
+          "business_finance"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-28234",
+      "usage": {
+        "input_tokens": 566,
+        "output_tokens": 61,
+        "reasoning_tokens": 28
+      },
+      "duration_ms": 383,
+      "output": {
+        "categories": [
+          "business_finance"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-1282",
+      "usage": {
+        "input_tokens": 645,
+        "output_tokens": 109,
+        "reasoning_tokens": 75
+      },
+      "duration_ms": 416,
+      "output": {
+        "categories": [
+          "startups_products",
+          "business_finance"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-3602",
+      "usage": {
+        "input_tokens": 526,
+        "output_tokens": 66,
+        "reasoning_tokens": 38
+      },
+      "duration_ms": 537,
+      "output": {
+        "categories": [
+          "startups_products"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-368",
+      "usage": {
+        "input_tokens": 568,
+        "output_tokens": 88,
+        "reasoning_tokens": 61
+      },
+      "duration_ms": 579,
+      "output": {
+        "categories": [
+          "design_creative"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-4960",
+      "usage": {
+        "input_tokens": 649,
+        "output_tokens": 44,
+        "reasoning_tokens": 11
+      },
+      "duration_ms": 509,
+      "output": {
+        "categories": [
+          "ai_data",
+          "design_creative"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-13978",
+      "usage": {
+        "input_tokens": 535,
+        "output_tokens": 60,
+        "reasoning_tokens": 32
+      },
+      "duration_ms": 269,
+      "output": {
+        "categories": [
+          "design_creative"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-28734",
+      "usage": {
+        "input_tokens": 560,
+        "output_tokens": 66,
+        "reasoning_tokens": 46
+      },
+      "duration_ms": 840,
+      "output": {
+        "categories": [
+          "marketing_sales"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-3710",
+      "usage": {
+        "input_tokens": 656,
+        "output_tokens": 73,
+        "reasoning_tokens": 47
+      },
+      "duration_ms": 633,
+      "output": {
+        "categories": [
+          "marketing_sales"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-11806",
+      "usage": {
+        "input_tokens": 558,
+        "output_tokens": 74,
+        "reasoning_tokens": 45
+      },
+      "duration_ms": 540,
+      "output": {
+        "categories": [
+          "soft_skills_languages"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-2982",
+      "error": "http_400"
+    },
+    {
+      "id": "real-27458",
+      "usage": {
+        "input_tokens": 642,
+        "output_tokens": 66,
+        "reasoning_tokens": 37
+      },
+      "duration_ms": 723,
+      "output": {
+        "categories": [
+          "soft_skills_languages"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-9698",
+      "usage": {
+        "input_tokens": 647,
+        "output_tokens": 78,
+        "reasoning_tokens": 49
+      },
+      "duration_ms": 400,
+      "output": {
+        "categories": [
+          "career_education_hr"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-1480",
+      "usage": {
+        "input_tokens": 589,
+        "output_tokens": 48,
+        "reasoning_tokens": 22
+      },
+      "duration_ms": 245,
+      "output": {
+        "categories": [
+          "other"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-30968",
+      "usage": {
+        "input_tokens": 656,
+        "output_tokens": 90,
+        "reasoning_tokens": 56
+      },
+      "duration_ms": 462,
+      "output": {
+        "categories": [
+          "business_finance",
+          "startups_products"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "real-2978-ru-translation",
+      "usage": {
+        "input_tokens": 323,
+        "output_tokens": 117,
+        "reasoning_tokens": 13
+      },
+      "duration_ms": 399,
+      "output": {
+        "title": "Python бағдарламалау тілінде Telegram-ботты әзірлеу",
+        "description": "- Telegram Bot API-мен танысу\n- Python-да әзірлеу негіздері\n- Практикалық мысалдар мен кеңестер",
+        "audience": "Junior әзірлеушілер, IT мамандықтары студенттері",
+        "speaker": "Дильназ Мұстафина"
+      },
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "Разработка Telegram-бота на языке программирования Python",
+        "description": "- Знакомство с Telegram Bot API\n- Основы разработки на Python\n- Практические примеры и советы",
+        "audience": "Junior разработчики, студенты IT-специальностей",
+        "speaker": "Дильназ Мустафина"
+      }
+    },
+    {
+      "id": "real-2978-kz-translation",
+      "usage": {
+        "input_tokens": 341,
+        "output_tokens": 117,
+        "reasoning_tokens": 16
+      },
+      "duration_ms": 631,
+      "output": {
+        "title": "Разработка Telegram-бота на языке программирования Python",
+        "description": "- Ознакомление с Telegram Bot API\n- Основы разработки на Python\n- Практические примеры и советы",
+        "audience": "Для младших разработчиков, студентов, обучающихся по ИТ-специальностям",
+        "speaker": "Дильназ Мустафина"
+      },
+      "source": {
+        "source_locale": "kz",
+        "target_locale": "ru",
+        "title": "Python бағдарламалау тілінде телеграм-бот әзірлеу",
+        "description": "- Telegram Bot API-мен танысу\n- Python-да әзірлеу негіздері\n- Практикалық мысалдар мен кеңестер",
+        "audience": "Junior әзірлеушілеріне, IT мамандықтарында оқып жүрген студенттерге",
+        "speaker": "Дильназ Мустафина"
+      }
+    },
+    {
+      "id": "real-3184-ru-translation",
+      "usage": {
+        "input_tokens": 332,
+        "output_tokens": 324,
+        "reasoning_tokens": 217
+      },
+      "duration_ms": 1140,
+      "output": {
+        "title": "GitOps практикасында AWS EKS және Flux & ArgoCD мысалында",
+        "description": "- GitOps-тың артықшылықтары\n- GitOps арқылы CI/CD орнату\n- Операция мен әзірлеуді біріктіру",
+        "audience": "студенттер, бағдарламашылар, DevOps мамандары",
+        "speaker": "Алина Шедрикс"
+      },
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "GitOps на практике на примере AWS EKS с Flux & ArgoCD",
+        "description": "- Преимущества GitOps\n- Настройка CI/CD с помощью GitOps\n- Объединение операций и разработки",
+        "audience": "студенты, программисты, Devops-специалисты",
+        "speaker": "Алина Шедрикс"
+      }
+    },
+    {
+      "id": "real-3184-kz-translation",
+      "usage": {
+        "input_tokens": 347,
+        "output_tokens": 295,
+        "reasoning_tokens": 189
+      },
+      "duration_ms": 919,
+      "output": {
+        "title": "Посмотрим практику GitOps на примере AWS EKS с помощью Flux и ArgoCD",
+        "description": "- Преимущества GitOps\n- Настройка CI/CD с помощью GitOps\n- Объединение операций и разработки",
+        "audience": "студентам, программистам, специалистам DevOps",
+        "speaker": "Алина Шедрикс"
+      },
+      "source": {
+        "source_locale": "kz",
+        "target_locale": "ru",
+        "title": "Flux & ArgoCD көмегімен AWS EKS мысалында Gitops тәжірибеден көру",
+        "description": "- GitOps артықшылықтары\n- GitOps көмегімен CI/CD-і баптау\n- Операциялар мен әзірлеуді біріктіру",
+        "audience": "студенттерге, бағдарламашыларға, Devops-мамандарға",
+        "speaker": "Алина Шедрикс"
+      }
+    },
+    {
+      "id": "real-13056-ru-translation",
+      "usage": {
+        "input_tokens": 336,
+        "output_tokens": 220,
+        "reasoning_tokens": 101
+      },
+      "duration_ms": 744,
+      "output": {
+        "title": "RAG архитектурасы немесе ИИ‑ге контекст беру",
+        "description": "- RAG қалай жұмыс істейді\n- Неліктен RAG модельді қосымша оқытудан тиімдірек\n- RAG өнімдерде қалай және қайда қолданылады: нақты мысалдар",
+        "audience": "IT мамандықтарының студенттері, әзірлеушілер, фрилансерлер",
+        "speaker": "Думан Марат"
+      },
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "Архитектура RAG или как дать ИИ контекст",
+        "description": "- Как работает RAG\n- Почему RAG эффективнее, чем дообучение модели\n- Где и как применяют RAG в продуктах: реальные кейсы",
+        "audience": "студенты IT специальностей, разработчики, фрилансеры",
+        "speaker": "Думан Марат"
+      }
+    },
+    {
+      "id": "real-13056-kz-translation",
+      "usage": {
+        "input_tokens": 357,
+        "output_tokens": 304,
+        "reasoning_tokens": 198
+      },
+      "duration_ms": 789,
+      "output": {
+        "title": "Как представить архитектуру RAG или контекст ИИ",
+        "description": "- Как работает RAG\n- Почему RAG эффективнее, чем обучение модели\n- Где и как используется RAG в продуктах: примеры из практики",
+        "audience": "Студентам IT-специальностей, разработчикам, фрилансерам",
+        "speaker": "Думан Марат"
+      },
+      "source": {
+        "source_locale": "kz",
+        "target_locale": "ru",
+        "title": "RAG архитектурасы немесе ЖИ контекстін қалай ұсынуға болады",
+        "description": "- RAG қалай жұмыс істейді\n- Неліктен RAG модельді үйренуден гөрі тиімді\n- RAG өнімдерде қайда және қалай қолданылады: өмірден алынған кейстер",
+        "audience": "IT мамандықтарының студенттеріне, әзірлеушілерге, фрилансерлерге",
+        "speaker": "Думан Марат"
+      }
+    },
+    {
+      "id": "real-9698-ru-translation",
+      "usage": {
+        "input_tokens": 450,
+        "output_tokens": 262,
+        "reasoning_tokens": 12
+      },
+      "duration_ms": 706,
+      "output": {
+        "title": "HR4People Meet Up",
+        "description": "Асем Садубаева (DataArt HR менеджері) – «Жасанды интеллект компания ішіндегі коммуникацияларды қалай жеңілдетеді»\n\nГотфрид Екатерина (Flip.kz компаниясының HR бөлімінің жетекшісі) – «Стажировка HR брендингі және рекрутингінің құралы ретінде»\n\nАнна Баедилова (Wooppay HR бренд менеджері) – «Қауымдастықтардың күші: адамдардың бірігуі бизнеске қалай құндылық қосады»\n\nМарат Нургалиев (ішкі коммуникациялар бойынша жетекші эксперт, HR блогері), Айгерим Серікова (HR4People директорі) – «Ішкі коммуникациялардың жаңа трендтері: сөзден іс-әрекетке»",
+        "audience": "HR трендтерінің ортасында болғысы келетін және кәсіби көзқарастарын кеңейткісі келетіндер үшін",
+        "speaker": "Human Resources"
+      },
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "HR4People Meet Up",
+        "description": "Асем Садубаева (HR менеджер DataArt) – \"Как ИИ упрощает коммуникации внутри компании\"\n\nГотфрид Екатерина (Руководитель HR отдела компании Flip.kz) – \"Стажировка как инструмент HR-брендинга и рекрутинга\"\n\nАнна Баедилова (HR brand manager Wooppay) – \"Сила сообществ: как объединение людей создаёт ценность для бизнеса\"\n\nМарат Нургалиев (топ-эксперт по внутренним коммуникациям, HR блогер), Айгерим Серикова (Директор HR4People) – \"Новые тренды внутренних коммуникаций: от слов к делу\"",
+        "audience": "для тех, кто хочет быть в центре HR-трендов и расширять профессиональные горизонты",
+        "speaker": "Human Resources"
+      }
+    },
+    {
+      "id": "real-9698-kz-translation",
+      "usage": {
+        "input_tokens": 477,
+        "output_tokens": 757,
+        "reasoning_tokens": 522
+      },
+      "duration_ms": 1973,
+      "output": {
+        "title": "HR4People Meet Up",
+        "description": "Асем Садубаева (HR-менеджер в DataArt) — «Как ИИ облегчает коммуникации внутри компании»\n\nГотфрид Екатерина (руководитель HR-отдела в Flip.kz) — «Стажировка как инструмент HR-брендинга и рекрутинга»\n\nАнна Баедилова (HR-бренд-менеджер в Wooppay) — «Сила сообществ: как объединение людей создает ценность для бизнеса»\n\nМарат Нургалиев (ведущий специалист по внутренним коммуникациям, HR-блогер) и Айгерим Серикова (директор HR4People) — «Новые тренды внутренних коммуникаций: от слов к действию»",
+        "audience": "Для тех, кто хочет находиться в центре HR-трендов и расширять профессиональный кругозор.",
+        "speaker": "Human Resources"
+      },
+      "source": {
+        "source_locale": "kz",
+        "target_locale": "ru",
+        "title": "HR4People Meet Up",
+        "description": "Асем Садубаева (DataArt-та HR менеджер) - \"ЖИ компания ішіндегі коммуникацияларды қалайша жеңілдетеді\"\n\nГотфрид Екатерина (Flip.kz компаниясында HR бөлімінің басшысы)-\"Тағылымдама HR-брендинг және рекрутинг құралы ретінде\"\n\nАнна Баедилова (Wooppay-де HR brand manager) – \"Қауымдастықтардың күші: адамдарды біріктіру бизнес үшін құндылықты қалай жасайды\"\n\nМарат Нургалиев (ішкі коммуникациялар бойынша топ-сарапшы, HR блогер), Айгерим Серикова (HR4People директоры) - \"Ішкі коммуникациялардың жаңа трендтері: сөзден бірден іске көшу\"",
+        "audience": "HR трендтерінің ортасында болуды және кәсіби ой-өрісін кеңейтуді қайлатындарға арналады",
+        "speaker": "Human Resources"
+      }
+    },
+    {
+      "id": "edge-injection",
+      "usage": {
+        "input_tokens": 517,
+        "output_tokens": 66,
+        "reasoning_tokens": 39
+      },
+      "duration_ms": 265,
+      "output": {
+        "categories": [
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "edge-long",
+      "usage": {
+        "input_tokens": 679,
+        "output_tokens": 56,
+        "reasoning_tokens": 27
+      },
+      "duration_ms": 601,
+      "output": {
+        "categories": [
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "edge-null",
+      "usage": {
+        "input_tokens": 480,
+        "output_tokens": 59,
+        "reasoning_tokens": 33
+      },
+      "duration_ms": 410,
+      "output": {
+        "categories": [
+          "development_it"
+        ]
+      },
+      "score": {
+        "passed": true,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "id": "edge-null-url-ru",
+      "usage": {
+        "input_tokens": 288,
+        "output_tokens": 126,
+        "reasoning_tokens": 69
+      },
+      "duration_ms": 654,
+      "output": {
+        "title": "Python",
+        "description": "https://example.com/event\nPython 3.13 / PostgreSQL 17",
+        "audience": null,
+        "speaker": null
+      },
+      "source": {
+        "source_locale": "ru",
+        "target_locale": "kz",
+        "title": "Python",
+        "description": "https://example.com/event\nPython 3.13 / PostgreSQL 17",
+        "audience": null,
+        "speaker": null
+      }
+    },
+    {
+      "id": "edge-null-url-kz",
+      "usage": {
+        "input_tokens": 288,
+        "output_tokens": 131,
+        "reasoning_tokens": 74
+      },
+      "duration_ms": 649,
+      "output": {
+        "title": "Python",
+        "description": "https://example.com/event\nPython 3.13 / PostgreSQL 17",
+        "audience": null,
+        "speaker": null
+      },
+      "source": {
+        "source_locale": "kz",
+        "target_locale": "ru",
+        "title": "Python",
+        "description": "https://example.com/event\nPython 3.13 / PostgreSQL 17",
+        "audience": null,
+        "speaker": null
+      }
+    }
+  ],
+  "headers": [
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "972",
+      "x-ratelimit-remaining-tokens": "7321",
+      "x-ratelimit-reset-requests": "40m19.2s",
+      "x-ratelimit-reset-tokens": "5.092s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "971",
+      "x-ratelimit-remaining-tokens": "7121",
+      "x-ratelimit-reset-requests": "41m45.6s",
+      "x-ratelimit-reset-tokens": "6.592s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "970",
+      "x-ratelimit-remaining-tokens": "6857",
+      "x-ratelimit-reset-requests": "43m12s",
+      "x-ratelimit-reset-tokens": "8.572s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "969",
+      "x-ratelimit-remaining-tokens": "7277",
+      "x-ratelimit-reset-requests": "44m38.4s",
+      "x-ratelimit-reset-tokens": "5.422s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "968",
+      "x-ratelimit-remaining-tokens": "6869",
+      "x-ratelimit-reset-requests": "46m4.8s",
+      "x-ratelimit-reset-tokens": "8.482s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "967",
+      "x-ratelimit-remaining-tokens": "7132",
+      "x-ratelimit-reset-requests": "47m31.2s",
+      "x-ratelimit-reset-tokens": "6.51s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "966",
+      "x-ratelimit-remaining-tokens": "6867",
+      "x-ratelimit-reset-requests": "48m57.6s",
+      "x-ratelimit-reset-tokens": "8.497s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "965",
+      "x-ratelimit-remaining-tokens": "7099",
+      "x-ratelimit-reset-requests": "50m24s",
+      "x-ratelimit-reset-tokens": "6.757s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "964",
+      "x-ratelimit-remaining-tokens": "7180",
+      "x-ratelimit-reset-requests": "51m50.399s",
+      "x-ratelimit-reset-tokens": "6.149s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "963",
+      "x-ratelimit-remaining-tokens": "7127",
+      "x-ratelimit-reset-requests": "53m16.799s",
+      "x-ratelimit-reset-tokens": "6.547s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "962",
+      "x-ratelimit-remaining-tokens": "7280",
+      "x-ratelimit-reset-requests": "54m43.2s",
+      "x-ratelimit-reset-tokens": "5.399s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "961",
+      "x-ratelimit-remaining-tokens": "7042",
+      "x-ratelimit-reset-requests": "56m9.6s",
+      "x-ratelimit-reset-tokens": "7.185s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "960",
+      "x-ratelimit-remaining-tokens": "6972",
+      "x-ratelimit-reset-requests": "57m36s",
+      "x-ratelimit-reset-tokens": "7.71s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "959",
+      "x-ratelimit-remaining-tokens": "7010",
+      "x-ratelimit-reset-requests": "59m2.4s",
+      "x-ratelimit-reset-tokens": "7.425s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "958",
+      "x-ratelimit-remaining-tokens": "7233",
+      "x-ratelimit-reset-requests": "1h0m28.8s",
+      "x-ratelimit-reset-tokens": "5.752s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "957",
+      "x-ratelimit-remaining-tokens": "7290",
+      "x-ratelimit-reset-requests": "1h1m55.2s",
+      "x-ratelimit-reset-tokens": "5.324s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "956",
+      "x-ratelimit-remaining-tokens": "7294",
+      "x-ratelimit-reset-requests": "1h3m21.6s",
+      "x-ratelimit-reset-tokens": "5.295s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "955",
+      "x-ratelimit-remaining-tokens": "7226",
+      "x-ratelimit-reset-requests": "1h4m48s",
+      "x-ratelimit-reset-tokens": "5.805s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "954",
+      "x-ratelimit-remaining-tokens": "7252",
+      "x-ratelimit-reset-requests": "1h6m14.4s",
+      "x-ratelimit-reset-tokens": "5.61s"
+    },
+    {
+      "status": 400,
+      "error_code": "json_validate_failed",
+      "error_type": "invalid_request_error",
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "953",
+      "x-ratelimit-remaining-tokens": "7289",
+      "x-ratelimit-reset-requests": "1h7m40.8s",
+      "x-ratelimit-reset-tokens": "5.332s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "952",
+      "x-ratelimit-remaining-tokens": "7045",
+      "x-ratelimit-reset-requests": "1h9m7.2s",
+      "x-ratelimit-reset-tokens": "7.162s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "951",
+      "x-ratelimit-remaining-tokens": "7223",
+      "x-ratelimit-reset-requests": "1h10m33.6s",
+      "x-ratelimit-reset-tokens": "5.827s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "950",
+      "x-ratelimit-remaining-tokens": "7270",
+      "x-ratelimit-reset-requests": "1h12m0s",
+      "x-ratelimit-reset-tokens": "5.475s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "949",
+      "x-ratelimit-remaining-tokens": "6963",
+      "x-ratelimit-reset-requests": "1h13m26.4s",
+      "x-ratelimit-reset-tokens": "7.777s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "948",
+      "x-ratelimit-remaining-tokens": "7364",
+      "x-ratelimit-reset-requests": "1h14m52.8s",
+      "x-ratelimit-reset-tokens": "4.77s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "947",
+      "x-ratelimit-remaining-tokens": "7301",
+      "x-ratelimit-reset-requests": "1h16m19.2s",
+      "x-ratelimit-reset-tokens": "5.242s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "946",
+      "x-ratelimit-remaining-tokens": "7529",
+      "x-ratelimit-reset-requests": "1h17m45.6s",
+      "x-ratelimit-reset-tokens": "3.532s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "945",
+      "x-ratelimit-remaining-tokens": "7177",
+      "x-ratelimit-reset-requests": "1h19m12s",
+      "x-ratelimit-reset-tokens": "6.172s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "944",
+      "x-ratelimit-remaining-tokens": "7080",
+      "x-ratelimit-reset-requests": "1h20m38.4s",
+      "x-ratelimit-reset-tokens": "6.9s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "942",
+      "x-ratelimit-remaining-tokens": "7331",
+      "x-ratelimit-reset-requests": "1h23m31.2s",
+      "x-ratelimit-reset-tokens": "5.017s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "941",
+      "x-ratelimit-remaining-tokens": "7279",
+      "x-ratelimit-reset-requests": "1h24m57.599s",
+      "x-ratelimit-reset-tokens": "5.407s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "940",
+      "x-ratelimit-remaining-tokens": "7234",
+      "x-ratelimit-reset-requests": "1h26m24s",
+      "x-ratelimit-reset-tokens": "5.745s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "939",
+      "x-ratelimit-remaining-tokens": "6738",
+      "x-ratelimit-reset-requests": "1h27m50.4s",
+      "x-ratelimit-reset-tokens": "9.465s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "938",
+      "x-ratelimit-remaining-tokens": "7205",
+      "x-ratelimit-reset-requests": "1h29m16.8s",
+      "x-ratelimit-reset-tokens": "5.962s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "937",
+      "x-ratelimit-remaining-tokens": "7343",
+      "x-ratelimit-reset-requests": "1h30m43.2s",
+      "x-ratelimit-reset-tokens": "4.927s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "936",
+      "x-ratelimit-remaining-tokens": "7400",
+      "x-ratelimit-reset-requests": "1h32m9.6s",
+      "x-ratelimit-reset-tokens": "4.5s"
+    },
+    {
+      "status": 200,
+      "x-ratelimit-limit-requests": "1000",
+      "x-ratelimit-limit-tokens": "8000",
+      "x-ratelimit-remaining-requests": "935",
+      "x-ratelimit-remaining-tokens": "7194",
+      "x-ratelimit-reset-requests": "1h33m36s",
+      "x-ratelimit-reset-tokens": "6.045s"
+    }
+  ],
+  "note": "Agent labels frozen before inference; translation semantic review is separate.",
+  "finished_at": "2026-10-21T17:44:51.235942+00:00"
+}
