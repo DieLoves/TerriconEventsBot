@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from terricon_events_bot.application.broadcasts import BroadcastService
@@ -21,12 +21,14 @@ from terricon_events_bot.application.users import UserService
 from terricon_events_bot.domain.enums import (
     AccessMode,
     BroadcastAudience,
+    BroadcastStatus,
     FeedbackKind,
     Locale,
     TicketStatus,
 )
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
 from terricon_events_bot.infrastructure.models import (
+    Broadcast,
     BroadcastDelivery,
     FeedbackMessage,
     FeedbackTicket,
@@ -130,6 +132,28 @@ async def test_feedback_wizard_rate_limit_block_and_two_way_dialogue(
 
 
 @pytest.mark.asyncio
+async def test_closing_ticket_is_idempotent_and_clears_pending_admin_reply(
+    feedback_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = feedback_database
+    user_id = await add_user(session_factory, 7_100_006)
+    admin_id = await add_user(session_factory, 7_100_007)
+    service = FeedbackService(session_factory)
+    await service.begin(user_id, FeedbackKind.ERROR)
+    await service.set_text(user_id, "Close once")
+    await service.set_photo(user_id, None)
+    notification = await service.confirm(user_id)
+    await service.begin_admin_reply(admin_id, notification.ticket_id)
+
+    first = await service.close(notification.ticket_id)
+    second = await service.close(notification.ticket_id)
+
+    assert first is True
+    assert second is False
+    assert await service.pending_admin_reply(admin_id) is None
+
+
+@pytest.mark.asyncio
 async def test_feedback_cleanup_and_profile_deletion_remove_private_data(
     feedback_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
@@ -165,12 +189,16 @@ async def test_feedback_cleanup_and_profile_deletion_remove_private_data(
     await users.delete_profile(user_id)
 
     async with session_factory() as session:
+        stored_broadcast = await session.get(Broadcast, broadcast.broadcast_id)
         assert await session.get(User, user_id) is None
         assert await session.scalar(select(func.count()).select_from(FeedbackTicket)) == 0
         assert await session.scalar(select(func.count()).select_from(FeedbackMessage)) == 0
         assert await session.scalar(select(func.count()).select_from(FsmState)) == 0
         assert await session.scalar(select(func.count()).select_from(SubscriptionSettings)) == 0
         assert await session.scalar(select(func.count()).select_from(BroadcastDelivery)) == 0
+        assert stored_broadcast is not None
+        assert stored_broadcast.status is BroadcastStatus.COMPLETED
+        assert stored_broadcast.total_count == 0
 
 
 @pytest.mark.asyncio
@@ -183,3 +211,32 @@ async def test_user_reply_requires_ticket_waiting_for_user(
 
     with pytest.raises(FeedbackStateError):
         await service.add_user_reply(user_id, body="Unexpected")
+
+
+@pytest.mark.asyncio
+async def test_open_ticket_list_uses_two_batched_queries(
+    feedback_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    engine, session_factory = feedback_database
+    user_id = await add_user(session_factory, 7_100_005)
+    service = FeedbackService(session_factory)
+    for kind in (FeedbackKind.ERROR, FeedbackKind.IDEA):
+        await service.begin(user_id, kind)
+        await service.set_text(user_id, f"Ticket {kind.value}")
+        await service.set_photo(user_id, None)
+        await service.confirm(user_id)
+
+    statements: list[str] = []
+
+    def track_query(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", track_query)
+    try:
+        tickets = await service.list_open()
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", track_query)
+
+    assert len(tickets) == 2
+    assert len(statements) == 2
+    assert all(len(ticket.messages) == 1 for ticket in tickets)

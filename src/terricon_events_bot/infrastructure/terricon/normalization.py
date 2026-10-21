@@ -133,7 +133,11 @@ def _normalize_date(value: datetime, unix: int) -> tuple[datetime, list[Normaliz
         value = value.replace(tzinfo=UTC)
         issues.append(NormalizationIssue("naive_datetime", "date_start.iso", "naive"))
     normalized = value.astimezone(UTC)
-    if abs(normalized.timestamp() - unix) > 1:
+    try:
+        matches_unix = abs(normalized.timestamp() - unix) <= 1
+    except (OverflowError, OSError, ValueError):
+        matches_unix = False
+    if not matches_unix:
         issues.append(NormalizationIssue("date_mismatch", "date_start", "iso_unix"))
     return normalized, issues
 

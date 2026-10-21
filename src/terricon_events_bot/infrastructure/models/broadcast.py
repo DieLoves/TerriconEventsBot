@@ -40,6 +40,12 @@ class Broadcast(Base):
             "updated_at",
             postgresql_where=text("status IN ('ready', 'running')"),
         ),
+        Index(
+            "ix_broadcasts_pending_report",
+            "report_locked_at",
+            "id",
+            postgresql_where=text("status = 'completed' AND report_sent_at IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -63,6 +69,7 @@ class Broadcast(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     report_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    report_locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -94,6 +101,11 @@ class BroadcastDelivery(Base):
             "ix_broadcast_deliveries_claimable",
             "next_attempt_at",
             "locked_at",
+            postgresql_where=text("status IN ('pending', 'retry_wait', 'processing')"),
+        ),
+        Index(
+            "ix_broadcast_deliveries_active_user_id",
+            "user_id",
             postgresql_where=text("status IN ('pending', 'retry_wait', 'processing')"),
         ),
     )

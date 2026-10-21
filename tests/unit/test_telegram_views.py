@@ -178,6 +178,8 @@ def test_kz_fallback_and_image_preferences_are_applied(tmp_path: Path) -> None:
 def test_feedback_wizard_and_delete_warning_require_confirmation(tmp_path: Path) -> None:
     telegram_views = views(tmp_path)
     current_user = user()
+    current_user.display_name = "Preview <Name>"
+    current_user.username = "preview_user"
 
     feedback = telegram_views.feedback(current_user)
     preview = telegram_views.feedback_preview(
@@ -192,6 +194,27 @@ def test_feedback_wizard_and_delete_warning_require_confirmation(tmp_path: Path)
         "Другое",
     }
     assert "Unsafe &lt;text&gt;" in preview.text
+    assert "Preview &lt;Name&gt;" in preview.text
+    assert "@preview_user" in preview.text
     assert "Подтвердить" in {
         button.text for row in privacy.keyboard.inline_keyboard for button in row
+    }
+
+
+def test_feedback_preview_fits_telegram_after_html_escaping(tmp_path: Path) -> None:
+    telegram_views = views(tmp_path)
+    current_user = user()
+    current_user.display_name = "&" * 255
+    current_user.username = "u" * 64
+
+    preview = telegram_views.feedback_preview(
+        current_user,
+        FeedbackDraft(FeedbackKind.OTHER, "<&" * 1333, None, "preview"),
+    )
+
+    assert len(preview.text) <= 4096
+    assert "…" in preview.text
+    assert "<&" not in preview.text
+    assert "Подтвердить" in {
+        button.text for row in preview.keyboard.inline_keyboard for button in row
     }

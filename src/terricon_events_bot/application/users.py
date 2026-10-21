@@ -4,13 +4,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from terricon_events_bot.domain.enums import AccessMode, Locale, TicketStatus
+from terricon_events_bot.domain.enums import (
+    AccessMode,
+    BroadcastStatus,
+    DeliveryStatus,
+    Locale,
+    TicketStatus,
+)
 from terricon_events_bot.infrastructure.models import (
     BetaAllowlistEntry,
+    Broadcast,
+    BroadcastDelivery,
     FeedbackTicket,
     FsmState,
     User,
@@ -69,7 +77,7 @@ class UserService:
                     access_granted=True,
                     last_active_at=now,
                 )
-                await session.execute(
+                user = await session.scalar(
                     statement.on_conflict_do_update(
                         index_elements=[User.telegram_id],
                         set_={
@@ -79,10 +87,7 @@ class UserService:
                             "access_granted": True,
                             "last_active_at": now,
                         },
-                    )
-                )
-                user = await session.scalar(
-                    select(User).where(User.telegram_id == principal.telegram_id)
+                    ).returning(User)
                 )
                 if user is None:
                     raise RuntimeError("User upsert did not return a persisted user")
@@ -122,6 +127,15 @@ class UserService:
                 if user is None:
                     return
                 now = datetime.now(UTC)
+                affected_broadcast_ids = tuple(
+                    (
+                        await session.scalars(
+                            select(BroadcastDelivery.broadcast_id)
+                            .where(BroadcastDelivery.user_id == user_id)
+                            .distinct()
+                        )
+                    ).all()
+                )
                 await session.execute(
                     update(FeedbackTicket)
                     .where(
@@ -135,6 +149,40 @@ class UserService:
                     )
                 )
                 await session.delete(user)
+                await session.flush()
+                for broadcast_id in affected_broadcast_ids:
+                    broadcast = await session.get(Broadcast, broadcast_id, with_for_update=True)
+                    if broadcast is None:
+                        continue
+                    count_rows = (
+                        await session.execute(
+                            select(BroadcastDelivery.status, func.count())
+                            .where(BroadcastDelivery.broadcast_id == broadcast_id)
+                            .group_by(BroadcastDelivery.status)
+                        )
+                    ).all()
+                    counts: dict[DeliveryStatus, int] = {
+                        status: count for status, count in count_rows
+                    }
+                    broadcast.total_count = sum(counts.values())
+                    broadcast.sent_count = counts.get(DeliveryStatus.SENT, 0)
+                    broadcast.failed_count = counts.get(DeliveryStatus.FAILED, 0) + counts.get(
+                        DeliveryStatus.BLOCKED, 0
+                    )
+                    unfinished = sum(
+                        counts.get(status, 0)
+                        for status in (
+                            DeliveryStatus.PENDING,
+                            DeliveryStatus.PROCESSING,
+                            DeliveryStatus.RETRY_WAIT,
+                        )
+                    )
+                    if unfinished == 0 and broadcast.status in (
+                        BroadcastStatus.READY,
+                        BroadcastStatus.RUNNING,
+                    ):
+                        broadcast.status = BroadcastStatus.COMPLETED
+                        broadcast.completed_at = now
 
     async def _is_allowed(self, session: AsyncSession, telegram_id: int, is_admin: bool) -> bool:
         if self._access_mode is AccessMode.PUBLIC or is_admin:

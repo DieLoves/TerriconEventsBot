@@ -102,6 +102,17 @@ def test_description_preserves_line_breaks_while_cleaning_horizontal_space() -> 
     assert event.localization.description == "First line\nSecond line\n\nThird line"
 
 
+def test_pathological_unix_timestamp_is_reported_without_breaking_record() -> None:
+    raw = deepcopy(load_fixture(Locale.RU, SourceTheme.IT))
+    raw["card_info"]["date_start"]["unix"] = 10**10_000
+    dto = TerriconEventDTO.model_validate(raw)
+
+    event, issues = normalize_event(dto, Locale.RU, SourceTheme.IT)
+
+    assert event.source_id == raw["id"]
+    assert {issue.code for issue in issues} == {"date_mismatch"}
+
+
 def test_source_id_is_strictly_positive_integer() -> None:
     raw = deepcopy(load_fixture(Locale.RU, SourceTheme.IT))
     raw["id"] = "101"

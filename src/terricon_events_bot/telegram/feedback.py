@@ -14,7 +14,9 @@ from terricon_events_bot.application.feedback import (
     FeedbackStateError,
 )
 from terricon_events_bot.application.users import UserService
+from terricon_events_bot.domain.enums import Locale
 from terricon_events_bot.infrastructure.models import User
+from terricon_events_bot.localization import LocalizationCatalog
 from terricon_events_bot.telegram.callbacks import (
     AdminTicketAction,
     AdminTicketCallback,
@@ -28,9 +30,15 @@ from terricon_events_bot.telegram.views import TelegramViews
 
 
 class AiogramFeedbackGateway:
-    def __init__(self, bot: Bot, admin_chat_id: int) -> None:
+    def __init__(
+        self,
+        bot: Bot,
+        admin_chat_id: int,
+        localizations: LocalizationCatalog,
+    ) -> None:
         self._bot = bot
         self._admin_chat_id = admin_chat_id
+        self._localizations = localizations
 
     async def publish(self, notification: FeedbackNotification) -> tuple[int, int]:
         if notification.telegram_file_id is not None:
@@ -51,19 +59,22 @@ class AiogramFeedbackGateway:
             raise normalize_telegram_error(error) from error
         return self._admin_chat_id, message.message_id
 
-    async def send_user_reply(self, telegram_id: int, body: str) -> int:
+    async def send_user_reply(self, telegram_id: int, locale: Locale, body: str) -> int:
         try:
             message = await self._bot.send_message(
                 chat_id=telegram_id,
-                text=f"Ответ администратора:\n\n{body}",
+                text=f"{self._localizations.get(locale, 'feedback.admin_reply')}\n\n{body}",
             )
         except TelegramAPIError as error:
             raise normalize_telegram_error(error) from error
         return message.message_id
 
-    async def notify_closed(self, telegram_id: int) -> None:
+    async def notify_closed(self, telegram_id: int, locale: Locale) -> None:
         try:
-            await self._bot.send_message(chat_id=telegram_id, text="Обращение закрыто.")
+            await self._bot.send_message(
+                chat_id=telegram_id,
+                text=self._localizations.get(locale, "feedback.ticket_closed"),
+            )
         except TelegramAPIError as error:
             raise normalize_telegram_error(error) from error
 

@@ -9,20 +9,25 @@ from typing import Any, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 
 from terricon_events_bot.domain.enums import (
+    BroadcastStatus,
     CategorySlug,
+    ClassificationStatus,
     DeliveryStatus,
     Locale,
     NotificationType,
 )
 from terricon_events_bot.infrastructure.models import (
+    Broadcast,
+    BroadcastDelivery,
     DomainChange,
     Event,
+    EventClassification,
     EventLocalization,
     NotificationDelivery,
     NotificationOutbox,
@@ -36,6 +41,7 @@ _TELEGRAM_TEXT_LIMIT = 4096
 _SAFE_TEXT_LIMIT = 4000
 _TITLE_LIMIT = 500
 _DEFAULT_LEASE = timedelta(minutes=5)
+_INSERT_BATCH_SIZE = 1000
 
 
 class Clock(Protocol):
@@ -223,14 +229,27 @@ class OutboxService:
     async def materialize(self, *, limit: int = 200) -> MaterializeResult:
         if limit <= 0:
             raise ValueError("Materialization limit must be positive")
-        now = self._clock.now().astimezone(UTC)
+        now = self._now()
         async with self._session_factory() as session:
             async with session.begin():
                 changes = list(
                     (
                         await session.scalars(
                             select(DomainChange)
-                            .where(DomainChange.materialized_at.is_(None))
+                            .where(
+                                DomainChange.materialized_at.is_(None),
+                                ~select(EventClassification.event_id)
+                                .where(
+                                    EventClassification.event_id == DomainChange.event_id,
+                                    EventClassification.status.in_(
+                                        (
+                                            ClassificationStatus.PENDING,
+                                            ClassificationStatus.RETRY_WAIT,
+                                        )
+                                    ),
+                                )
+                                .exists(),
+                            )
                             .order_by(DomainChange.id)
                             .limit(limit)
                             .with_for_update(skip_locked=True)
@@ -243,25 +262,27 @@ class OutboxService:
                 for change in changes:
                     recipient_ids = await self._recipient_ids(session, change)
                     if recipient_ids:
-                        statement = pg_insert(NotificationDelivery).values(
-                            [
-                                {
-                                    "user_id": user_id,
-                                    "domain_change_id": change.id,
-                                    "event_id": change.event_id,
-                                    "event_revision": change.event_revision,
-                                    "notification_type": change.notification_type,
-                                    "status": DeliveryStatus.PENDING,
-                                }
-                                for user_id in recipient_ids
-                            ]
-                        )
-                        result = await session.execute(
-                            statement.on_conflict_do_nothing(
-                                constraint="uq_notification_deliveries_idempotency"
-                            ).returning(NotificationDelivery.id)
-                        )
-                        inserted += len(result.scalars().all())
+                        for offset in range(0, len(recipient_ids), _INSERT_BATCH_SIZE):
+                            batch = recipient_ids[offset : offset + _INSERT_BATCH_SIZE]
+                            statement = pg_insert(NotificationDelivery).values(
+                                [
+                                    {
+                                        "user_id": user_id,
+                                        "domain_change_id": change.id,
+                                        "event_id": change.event_id,
+                                        "event_revision": change.event_revision,
+                                        "notification_type": change.notification_type,
+                                        "status": DeliveryStatus.PENDING,
+                                    }
+                                    for user_id in batch
+                                ]
+                            )
+                            result = await session.execute(
+                                statement.on_conflict_do_nothing(
+                                    constraint="uq_notification_deliveries_idempotency"
+                                ).returning(NotificationDelivery.id)
+                            )
+                            inserted += len(result.scalars().all())
                     change.materialized_at = now
                 change_ids = [change.id for change in changes]
                 user_ids = tuple(
@@ -461,6 +482,12 @@ class OutboxService:
             )
         )
 
+    def _now(self) -> datetime:
+        now = self._clock.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Outbox clock must return a timezone-aware datetime")
+        return now.astimezone(UTC)
+
 
 class DeliveryWorker:
     def __init__(
@@ -495,7 +522,7 @@ class DeliveryWorker:
         )
 
     async def _claim(self, limit: int) -> tuple[int, ...]:
-        now = self._clock.now().astimezone(UTC)
+        now = self._now()
         stale_before = now - self._lease
         async with self._session_factory() as session:
             async with session.begin():
@@ -516,7 +543,10 @@ class DeliveryWorker:
                                     ),
                                     and_(
                                         NotificationOutbox.status == DeliveryStatus.PROCESSING,
-                                        NotificationOutbox.locked_at <= stale_before,
+                                        or_(
+                                            NotificationOutbox.locked_at.is_(None),
+                                            NotificationOutbox.locked_at <= stale_before,
+                                        ),
                                     ),
                                 )
                             )
@@ -572,8 +602,7 @@ class DeliveryWorker:
                 await self._fail(outbox_id, error.code)
                 return "failed"
             await self._ack_chunk(outbox_id, message_id, chunk.delivery_ids)
-        await self._complete(outbox_id)
-        return "sent"
+        return "sent" if await self._complete(outbox_id) else "failed"
 
     @staticmethod
     def _payload_chunks(payload: Mapping[str, Any]) -> tuple[DigestChunk, ...]:
@@ -602,7 +631,7 @@ class DeliveryWorker:
     async def _ack_chunk(
         self, outbox_id: int, message_id: int, delivery_ids: tuple[int, ...]
     ) -> None:
-        now = self._clock.now().astimezone(UTC)
+        now = self._now()
         async with self._session_factory() as session:
             async with session.begin():
                 outbox = await session.get(NotificationOutbox, outbox_id, with_for_update=True)
@@ -620,13 +649,13 @@ class DeliveryWorker:
                     .values(status=DeliveryStatus.SENT, sent_at=now, next_attempt_at=None)
                 )
 
-    async def _complete(self, outbox_id: int) -> None:
-        now = self._clock.now().astimezone(UTC)
+    async def _complete(self, outbox_id: int) -> bool:
+        now = self._now()
         async with self._session_factory() as session:
             async with session.begin():
                 outbox = await session.get(NotificationOutbox, outbox_id, with_for_update=True)
                 if outbox is None:
-                    return
+                    return False
                 remaining = await session.scalar(
                     select(NotificationDelivery.id).where(
                         NotificationDelivery.outbox_id == outbox_id,
@@ -635,15 +664,28 @@ class DeliveryWorker:
                 )
                 if remaining is not None:
                     outbox.status = DeliveryStatus.FAILED
+                    outbox.locked_at = None
                     outbox.last_error_code = "incomplete_payload"
-                    return
+                    await session.execute(
+                        update(NotificationDelivery)
+                        .where(
+                            NotificationDelivery.outbox_id == outbox_id,
+                            NotificationDelivery.status != DeliveryStatus.SENT,
+                        )
+                        .values(
+                            status=DeliveryStatus.FAILED,
+                            last_error_code="incomplete_payload",
+                        )
+                    )
+                    return False
                 outbox.status = DeliveryStatus.SENT
                 outbox.sent_at = now
                 outbox.locked_at = None
                 outbox.last_error_code = None
+                return True
 
     async def _retry(self, outbox_id: int, error: TelegramSendError) -> None:
-        now = self._clock.now().astimezone(UTC)
+        now = self._now()
         async with self._session_factory() as session:
             async with session.begin():
                 outbox = await session.get(NotificationOutbox, outbox_id, with_for_update=True)
@@ -688,8 +730,25 @@ class DeliveryWorker:
                 )
 
     async def _block_user(self, user_id: int, code: str) -> None:
+        now = self._now()
         async with self._session_factory() as session:
             async with session.begin():
+                broadcast_ids = set(
+                    (
+                        await session.scalars(
+                            select(BroadcastDelivery.broadcast_id).where(
+                                BroadcastDelivery.user_id == user_id,
+                                BroadcastDelivery.status.in_(
+                                    (
+                                        DeliveryStatus.PENDING,
+                                        DeliveryStatus.PROCESSING,
+                                        DeliveryStatus.RETRY_WAIT,
+                                    )
+                                ),
+                            )
+                        )
+                    ).all()
+                )
                 await session.execute(
                     update(User).where(User.id == user_id).values(is_active=False)
                 )
@@ -725,3 +784,57 @@ class DeliveryWorker:
                     )
                     .values(status=DeliveryStatus.BLOCKED, last_error_code=code[:128])
                 )
+                await session.execute(
+                    update(BroadcastDelivery)
+                    .where(
+                        BroadcastDelivery.user_id == user_id,
+                        BroadcastDelivery.status.in_(
+                            (
+                                DeliveryStatus.PENDING,
+                                DeliveryStatus.PROCESSING,
+                                DeliveryStatus.RETRY_WAIT,
+                            )
+                        ),
+                    )
+                    .values(
+                        status=DeliveryStatus.BLOCKED,
+                        locked_at=None,
+                        last_error_code=code[:128],
+                    )
+                )
+                for broadcast_id in sorted(broadcast_ids):
+                    broadcast = await session.get(Broadcast, broadcast_id, with_for_update=True)
+                    if broadcast is None:
+                        continue
+                    count_rows = (
+                        await session.execute(
+                            select(BroadcastDelivery.status, func.count())
+                            .where(BroadcastDelivery.broadcast_id == broadcast_id)
+                            .group_by(BroadcastDelivery.status)
+                        )
+                    ).all()
+                    counts = {status: count for status, count in count_rows}
+                    broadcast.sent_count = counts.get(DeliveryStatus.SENT, 0)
+                    broadcast.failed_count = counts.get(DeliveryStatus.FAILED, 0) + counts.get(
+                        DeliveryStatus.BLOCKED, 0
+                    )
+                    unfinished = sum(
+                        counts.get(status, 0)
+                        for status in (
+                            DeliveryStatus.PENDING,
+                            DeliveryStatus.PROCESSING,
+                            DeliveryStatus.RETRY_WAIT,
+                        )
+                    )
+                    if unfinished == 0 and broadcast.status in (
+                        BroadcastStatus.READY,
+                        BroadcastStatus.RUNNING,
+                    ):
+                        broadcast.status = BroadcastStatus.COMPLETED
+                        broadcast.completed_at = now
+
+    def _now(self) -> datetime:
+        now = self._clock.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Delivery clock must return a timezone-aware datetime")
+        return now.astimezone(UTC)

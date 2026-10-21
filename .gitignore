@@ -10,5 +10,6 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+backups/
 .idea/
 .vscode/

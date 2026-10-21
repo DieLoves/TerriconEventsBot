@@ -13,6 +13,8 @@ from aiogram.exceptions import (
 
 from terricon_events_bot.application.delivery import TelegramSendError
 
+_MAX_RETRY_AFTER_SECONDS = 24 * 60 * 60
+
 
 class AiogramTelegramGateway:
     def __init__(self, bot: Bot) -> None:
@@ -33,7 +35,7 @@ def normalize_telegram_error(error: TelegramAPIError) -> TelegramSendError:
         return TelegramSendError(
             "telegram_retry_after",
             transient=True,
-            retry_after=timedelta(seconds=error.retry_after),
+            retry_after=timedelta(seconds=min(max(error.retry_after, 0), _MAX_RETRY_AFTER_SECONDS)),
         )
     if isinstance(error, (TelegramNetworkError, TelegramServerError)):
         return TelegramSendError("telegram_transient", transient=True)

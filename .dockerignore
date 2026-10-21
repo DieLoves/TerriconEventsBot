@@ -6,6 +6,7 @@
 .venv
 .worktrees
 __pycache__
+backups
 build
 dist
 htmlcov

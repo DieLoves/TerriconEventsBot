@@ -23,8 +23,8 @@ from terricon_events_bot.infrastructure.models.feedback import (
 )
 from terricon_events_bot.infrastructure.models.operations import (
     AdminAlert,
+    AIUsage,
     AppHeartbeat,
-    OpenAIUsage,
 )
 from terricon_events_bot.infrastructure.models.subscriptions import (
     SubscriptionCategory,
@@ -38,6 +38,7 @@ from terricon_events_bot.infrastructure.models.sync import (
 )
 
 __all__ = [
+    "AIUsage",
     "AdminAlert",
     "AppHeartbeat",
     "BetaAllowlistEntry",
@@ -54,7 +55,6 @@ __all__ = [
     "FsmState",
     "NotificationDelivery",
     "NotificationOutbox",
-    "OpenAIUsage",
     "SubscriptionCategory",
     "SubscriptionSettings",
     "SyncEndpointState",

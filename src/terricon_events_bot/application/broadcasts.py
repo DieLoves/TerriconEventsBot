@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -219,40 +219,35 @@ class BroadcastService:
                     conditions.append(User.locale == Locale.RU)
                 elif broadcast.audience is BroadcastAudience.KZ:
                     conditions.append(User.locale == Locale.KZ)
-                user_ids = tuple(
-                    (
-                        await session.scalars(select(User.id).where(*conditions).order_by(User.id))
-                    ).all()
-                )
-                if user_ids:
-                    await session.execute(
-                        pg_insert(BroadcastDelivery)
-                        .values(
-                            [
-                                {
-                                    "broadcast_id": broadcast_id,
-                                    "user_id": user_id,
-                                    "status": DeliveryStatus.PENDING,
-                                    "next_attempt_at": now,
-                                }
-                                for user_id in user_ids
-                            ]
-                        )
-                        .on_conflict_do_nothing(
-                            constraint="uq_broadcast_deliveries_broadcast_id_user_id"
-                        )
+                eligible_users = select(
+                    literal(broadcast_id, type_=BroadcastDelivery.broadcast_id.type),
+                    User.id,
+                    literal(now, type_=BroadcastDelivery.next_attempt_at.type),
+                ).where(*conditions)
+                inserted = (
+                    pg_insert(BroadcastDelivery)
+                    .from_select(
+                        ["broadcast_id", "user_id", "next_attempt_at"],
+                        eligible_users,
                     )
-                broadcast.total_count = len(user_ids)
+                    .on_conflict_do_nothing(
+                        constraint="uq_broadcast_deliveries_broadcast_id_user_id"
+                    )
+                    .returning(BroadcastDelivery.id)
+                    .cte("inserted_broadcast_deliveries")
+                )
+                total = int(await session.scalar(select(func.count()).select_from(inserted)) or 0)
+                broadcast.total_count = total
                 broadcast.confirmed_at = now
-                broadcast.status = BroadcastStatus.READY if user_ids else BroadcastStatus.COMPLETED
-                if not user_ids:
+                broadcast.status = BroadcastStatus.READY if total else BroadcastStatus.COMPLETED
+                if not total:
                     broadcast.completed_at = now
                 return BroadcastReport(
                     broadcast_id,
                     broadcast.status,
-                    len(user_ids),
+                    total,
                     0,
-                    len(user_ids),
+                    0,
                     0,
                     0,
                 )
@@ -269,7 +264,8 @@ class BroadcastService:
             if broadcast is None:
                 return None
             counts = await self._delivery_counts(session, broadcast_id)
-            return self._report(broadcast, counts)
+            transient = await self._transient_count(session, broadcast_id)
+            return self._report(broadcast, counts, transient)
 
     async def _draft_for_update(self, session: AsyncSession, broadcast_id: int) -> Broadcast:
         broadcast = await session.get(Broadcast, broadcast_id, with_for_update=True)
@@ -341,20 +337,29 @@ class BroadcastService:
         return {status: count for status, count in rows}
 
     @staticmethod
-    def _report(broadcast: Broadcast, counts: dict[DeliveryStatus, int]) -> BroadcastReport:
+    async def _transient_count(session: AsyncSession, broadcast_id: int) -> int:
+        count = await session.scalar(
+            select(func.count())
+            .select_from(BroadcastDelivery)
+            .where(
+                BroadcastDelivery.broadcast_id == broadcast_id,
+                BroadcastDelivery.attempts > 1,
+            )
+        )
+        return count or 0
+
+    @staticmethod
+    def _report(
+        broadcast: Broadcast,
+        counts: dict[DeliveryStatus, int],
+        transient: int,
+    ) -> BroadcastReport:
         return BroadcastReport(
             broadcast.id,
             broadcast.status,
             broadcast.total_count,
             counts.get(DeliveryStatus.SENT, 0),
-            sum(
-                counts.get(status, 0)
-                for status in (
-                    DeliveryStatus.PENDING,
-                    DeliveryStatus.PROCESSING,
-                    DeliveryStatus.RETRY_WAIT,
-                )
-            ),
+            transient,
             counts.get(DeliveryStatus.FAILED, 0),
             counts.get(DeliveryStatus.BLOCKED, 0),
         )
@@ -427,7 +432,7 @@ class BroadcastWorker:
                             )
                             .order_by(BroadcastDelivery.id)
                             .limit(limit)
-                            .with_for_update(skip_locked=True)
+                            .with_for_update(of=BroadcastDelivery, skip_locked=True)
                         )
                     ).all()
                 )
@@ -465,10 +470,17 @@ class BroadcastWorker:
             if not user.is_active or not user.access_granted:
                 await self._block(delivery_id, user.id, "inactive_user")
                 return "blocked"
+            body_locale = (
+                user.locale
+                if broadcast.audience is BroadcastAudience.BOTH
+                else Locale.RU
+                if broadcast.audience is BroadcastAudience.RU
+                else Locale.KZ
+            )
             body = await session.scalar(
                 select(BroadcastLocalization.body).where(
                     BroadcastLocalization.broadcast_id == broadcast.id,
-                    BroadcastLocalization.locale == user.locale,
+                    BroadcastLocalization.locale == body_locale,
                 )
             )
             if body is None:
@@ -610,7 +622,11 @@ class BroadcastWorker:
                             )
                         ),
                     )
-                    .values(status=DeliveryStatus.BLOCKED, last_error_code=code[:128])
+                    .values(
+                        status=DeliveryStatus.BLOCKED,
+                        locked_at=None,
+                        last_error_code=code[:128],
+                    )
                 )
                 await session.execute(
                     update(NotificationDelivery)
@@ -630,47 +646,79 @@ class BroadcastWorker:
                     await self._refresh_broadcast(session, broadcast_id, now)
 
     async def _send_completed_reports(self) -> None:
-        async with self._session_factory() as session:
-            broadcast_ids = tuple(
-                (
-                    await session.scalars(
-                        select(Broadcast.id)
-                        .where(
-                            Broadcast.status == BroadcastStatus.COMPLETED,
-                            Broadcast.report_sent_at.is_(None),
-                        )
-                        .order_by(Broadcast.id)
-                    )
-                ).all()
-            )
-        for broadcast_id in broadcast_ids:
+        claims = await self._claim_completed_reports()
+        for broadcast_id, claimed_at in claims:
             try:
-                await self._send_completed_report(broadcast_id)
+                await self._send_completed_report(broadcast_id, claimed_at)
             except TelegramSendError:
                 continue
 
-    async def _send_completed_report(self, broadcast_id: int) -> None:
+    async def _claim_completed_reports(
+        self, *, limit: int = 20
+    ) -> tuple[tuple[int, datetime], ...]:
         now = self._now()
+        stale = now - self._lease
         async with self._session_factory() as session:
             async with session.begin():
-                broadcast = await session.get(Broadcast, broadcast_id, with_for_update=True)
-                if (
-                    broadcast is None
-                    or broadcast.status is not BroadcastStatus.COMPLETED
-                    or broadcast.report_sent_at is not None
-                ):
-                    return
-                counts = await BroadcastService._delivery_counts(session, broadcast_id)
-                report = BroadcastService._report(broadcast, counts)
-                await self._gateway.send_report(
-                    broadcast.created_by_telegram_id,
+                broadcasts = list(
                     (
-                        f"Рассылка #{broadcast.id} завершена. "
-                        f"Доставлено: {report.sent}; ошибок: {report.failed}; "
-                        f"бот заблокирован: {report.blocked}."
-                    ),
+                        await session.scalars(
+                            select(Broadcast)
+                            .where(
+                                Broadcast.status == BroadcastStatus.COMPLETED,
+                                Broadcast.report_sent_at.is_(None),
+                                or_(
+                                    Broadcast.report_locked_at.is_(None),
+                                    Broadcast.report_locked_at <= stale,
+                                ),
+                            )
+                            .order_by(Broadcast.id)
+                            .limit(limit)
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).all()
                 )
-                broadcast.report_sent_at = now
+                for broadcast in broadcasts:
+                    broadcast.report_locked_at = now
+                return tuple((broadcast.id, now) for broadcast in broadcasts)
+
+    async def _send_completed_report(self, broadcast_id: int, claimed_at: datetime) -> None:
+        async with self._session_factory() as session:
+            broadcast = await session.scalar(
+                select(Broadcast).where(
+                    Broadcast.id == broadcast_id,
+                    Broadcast.status == BroadcastStatus.COMPLETED,
+                    Broadcast.report_sent_at.is_(None),
+                    Broadcast.report_locked_at == claimed_at,
+                )
+            )
+            if broadcast is None:
+                return
+            counts = await BroadcastService._delivery_counts(session, broadcast_id)
+            transient = await BroadcastService._transient_count(session, broadcast_id)
+            report = BroadcastService._report(broadcast, counts, transient)
+            admin_telegram_id = broadcast.created_by_telegram_id
+            text_value = (
+                f"Рассылка #{broadcast.id} завершена. "
+                f"Доставлено: {report.sent}; временных ошибок: {report.transient}; "
+                f"ошибок: {report.failed}; "
+                f"бот заблокирован: {report.blocked}."
+            )
+
+        await self._gateway.send_report(admin_telegram_id, text_value)
+        sent_at = self._now()
+        async with self._session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    update(Broadcast)
+                    .where(
+                        Broadcast.id == broadcast_id,
+                        Broadcast.status == BroadcastStatus.COMPLETED,
+                        Broadcast.report_sent_at.is_(None),
+                        Broadcast.report_locked_at == claimed_at,
+                    )
+                    .values(report_sent_at=sent_at, report_locked_at=None)
+                )
 
     async def _refresh_broadcast(
         self, session: AsyncSession, broadcast_id: int, now: datetime

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -172,7 +173,7 @@ class TerriconClient:
                             raise TerriconRequestError(
                                 f"http_{response.status_code}", attempt, response.status_code
                             )
-            except (httpx.TimeoutException, httpx.NetworkError, httpx.DecodingError) as error:
+            except (httpx.TransportError, httpx.DecodingError) as error:
                 error_code = "timeout" if isinstance(error, httpx.TimeoutException) else "network"
 
             if attempt >= attempts_limit:
@@ -222,4 +223,6 @@ class TerriconClient:
             if retry_at.tzinfo is None:
                 retry_at = retry_at.replace(tzinfo=UTC)
             seconds = (retry_at - self._clock()).total_seconds()
+        if not math.isfinite(seconds):
+            return None
         return max(0.0, seconds)

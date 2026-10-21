@@ -5,6 +5,8 @@ import pytest
 from terricon_events_bot.domain.enums import CategorySlug, Locale
 from terricon_events_bot.infrastructure.assets import AssetResolver
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def create_image(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,3 +36,14 @@ def test_asset_resolver_rejects_path_traversal(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="inside"):
         resolver.resolve(Locale.RU, "../secret")
+
+
+def test_repository_contains_main_and_all_category_assets() -> None:
+    resolver = AssetResolver(PROJECT_ROOT / "assets")
+
+    main = resolver.main(Locale.RU)
+    assert main is not None and main.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    for category in CategorySlug:
+        image = resolver.category(Locale.KZ, category)
+        assert image is not None
+        assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")

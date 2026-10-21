@@ -14,7 +14,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "asyncpg>=0.29,<1",
     "httpx>=0.27,<1",
-    "openai>=1.0,<3",
+    "groq>=0.37,<1",
     "pydantic-settings>=2.0,<3",
     "pyyaml>=6.0,<7",
     "sqlalchemy[asyncio]>=2.0,<3",
@@ -52,7 +52,10 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "ASYNC", "RUF"]
+select = ["E", "F", "I", "N", "UP", "B", "ASYNC", "RUF", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "S603"]
 
 [tool.mypy]
 python_version = "3.13"

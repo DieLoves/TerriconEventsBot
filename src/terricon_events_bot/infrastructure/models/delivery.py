@@ -77,6 +77,11 @@ class NotificationOutbox(Base):
             "locked_at",
             postgresql_where=text("status IN ('pending', 'retry_wait', 'processing')"),
         ),
+        Index(
+            "ix_notification_outbox_active_user_id",
+            "user_id",
+            postgresql_where=text("status IN ('pending', 'retry_wait', 'processing')"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -123,6 +128,13 @@ class NotificationDelivery(Base):
             name="uq_notification_deliveries_idempotency",
         ),
         Index("ix_notification_deliveries_status_next_attempt", "status", "next_attempt_at"),
+        Index("ix_notification_deliveries_outbox_id_status", "outbox_id", "status"),
+        Index(
+            "ix_notification_deliveries_unbundled_user_id_id",
+            "user_id",
+            "id",
+            postgresql_where=text("status = 'pending' AND outbox_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

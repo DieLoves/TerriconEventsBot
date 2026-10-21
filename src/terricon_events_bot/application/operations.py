@@ -1,22 +1,37 @@
 from __future__ import annotations
 
+# ruff: noqa: RUF001 - Russian admin alerts intentionally mix technical terms.
 import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, TypeVar
 
-from sqlalchemy import select, text, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from terricon_events_bot.application.sync import SyncResult, SyncService
-from terricon_events_bot.domain.enums import SyncTrigger
-from terricon_events_bot.infrastructure.models import AdminAlert, AppHeartbeat
+from terricon_events_bot.domain.enums import ClassificationStatus, DeliveryStatus, SyncTrigger
+from terricon_events_bot.infrastructure.models import (
+    AdminAlert,
+    AppHeartbeat,
+    BroadcastDelivery,
+    EventClassification,
+    NotificationOutbox,
+)
 
 T = TypeVar("T")
 APP_HEARTBEAT_NAME = "terricon-events-bot"
-SCHEMA_REVISION = "0009_stage7_broadcast_state"
+SCHEMA_REVISION = "0010_hardening_queue_state"
+_PROLONGED_QUEUE_AGE = timedelta(hours=1)
+_OPERATIONAL_ALERT_KINDS = frozenset(
+    {
+        "gpt_prolonged_failure",
+        "outbox_prolonged_failure",
+        "broadcast_prolonged_failure",
+    }
+)
 
 
 class Clock(Protocol):
@@ -186,6 +201,64 @@ class OperationsService:
         return now.astimezone(UTC)
 
 
+@dataclass(slots=True)
+class _RuntimeFailure:
+    first_seen_at: datetime
+    occurrences: int = 1
+    notified: bool = False
+
+
+class RuntimeFailureAlertService:
+    """Alerts without PostgreSQL when the database itself is unavailable."""
+
+    def __init__(
+        self,
+        gateway: AdminAlertGateway,
+        *,
+        threshold: timedelta = timedelta(minutes=5),
+        clock: Clock | None = None,
+    ) -> None:
+        if threshold <= timedelta():
+            raise ValueError("Runtime alert threshold must be positive")
+        self._gateway = gateway
+        self._threshold = threshold
+        self._clock = clock or SystemClock()
+        self._failures: dict[tuple[str, str], _RuntimeFailure] = {}
+
+    async def failed(self, component: str, error_code: str) -> bool:
+        now = self._now()
+        key = (component[:64], error_code[:128])
+        failure = self._failures.get(key)
+        if failure is None:
+            self._failures[key] = _RuntimeFailure(now)
+            return False
+        failure.occurrences += 1
+        if failure.notified or now - failure.first_seen_at < self._threshold:
+            return False
+        await self._gateway.send_alert(
+            (
+                "Служебное предупреждение\n"
+                f"Компонент: {key[0]}\n"
+                f"Код: {key[1]}\n"
+                f"Повторений: {failure.occurrences}"
+            )[:4096]
+        )
+        failure.notified = True
+        return True
+
+    def recovered(self, component: str) -> None:
+        normalized = component[:64]
+        self._failures = {
+            key: failure for key, failure in self._failures.items() if key[0] != normalized
+        }
+
+    def _now(self) -> datetime:
+        now = self._clock.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Runtime alert clock must return a timezone-aware datetime")
+        return now.astimezone(UTC)
+
+
 class AdminAlertService:
     def __init__(
         self,
@@ -197,6 +270,51 @@ class AdminAlertService:
         self._session_factory = session_factory
         self._gateway = gateway
         self._clock = clock or SystemClock()
+
+    async def refresh_operational(self) -> int:
+        now = self._now()
+        async with self._session_factory() as session:
+            async with session.begin():
+                groups = await self._operational_groups(session, now)
+                existing = {
+                    alert.fingerprint: alert
+                    for alert in (
+                        await session.scalars(
+                            select(AdminAlert).where(
+                                AdminAlert.kind.in_(_OPERATIONAL_ALERT_KINDS),
+                                AdminAlert.resolved_at.is_(None),
+                            )
+                        )
+                    ).all()
+                }
+                for fingerprint, (kind, details, affected) in groups.items():
+                    alert = existing.get(fingerprint)
+                    if alert is None:
+                        session.add(
+                            AdminAlert(
+                                kind=kind,
+                                fingerprint=fingerprint,
+                                details=details,
+                                occurrence_count=affected,
+                                first_seen_at=now,
+                                last_seen_at=now,
+                            )
+                        )
+                    elif alert.details != details:
+                        alert.details = details
+                        alert.occurrence_count += 1
+                        alert.last_seen_at = now
+                resolved = set(existing) - set(groups)
+                if resolved:
+                    await session.execute(
+                        update(AdminAlert)
+                        .where(
+                            AdminAlert.fingerprint.in_(resolved),
+                            AdminAlert.resolved_at.is_(None),
+                        )
+                        .values(resolved_at=now)
+                    )
+        return len(groups)
 
     async def dispatch(self, *, limit: int = 20) -> int:
         if limit <= 0:
@@ -243,6 +361,12 @@ class AdminAlertService:
                 f"Код: {alert.fingerprint}\n"
                 f"Повторений: {alert.occurrence_count}"
             )[:4096]
+            error_code = alert.details.get("error_code")
+            affected = alert.details.get("affected")
+            if isinstance(error_code, str):
+                text_value = f"{text_value}\nПричина: {error_code}"[:4096]
+            if isinstance(affected, int) and not isinstance(affected, bool):
+                text_value = f"{text_value}\nЗатронуто: {affected}"[:4096]
         await self._gateway.send_alert(text_value)
         now = self._now()
         async with self._session_factory() as session:
@@ -258,6 +382,69 @@ class AdminAlertService:
                     .returning(AdminAlert.id)
                 )
         return updated is not None
+
+    @staticmethod
+    async def _operational_groups(
+        session: AsyncSession,
+        now: datetime,
+    ) -> dict[str, tuple[str, dict[str, object], int]]:
+        cutoff = now - _PROLONGED_QUEUE_AGE
+        queries = (
+            (
+                "gpt_prolonged_failure",
+                select(EventClassification.last_error_code, func.count())
+                .where(
+                    EventClassification.status == ClassificationStatus.FALLBACK,
+                    EventClassification.last_error_code.is_not(None),
+                )
+                .group_by(EventClassification.last_error_code),
+            ),
+            (
+                "outbox_prolonged_failure",
+                select(NotificationOutbox.last_error_code, func.count())
+                .where(
+                    NotificationOutbox.last_error_code.is_not(None),
+                    or_(
+                        NotificationOutbox.status == DeliveryStatus.FAILED,
+                        and_(
+                            NotificationOutbox.status == DeliveryStatus.RETRY_WAIT,
+                            NotificationOutbox.created_at <= cutoff,
+                        ),
+                    ),
+                )
+                .group_by(NotificationOutbox.last_error_code),
+            ),
+            (
+                "broadcast_prolonged_failure",
+                select(BroadcastDelivery.last_error_code, func.count())
+                .where(
+                    BroadcastDelivery.last_error_code.is_not(None),
+                    or_(
+                        BroadcastDelivery.status == DeliveryStatus.FAILED,
+                        and_(
+                            BroadcastDelivery.status == DeliveryStatus.RETRY_WAIT,
+                            BroadcastDelivery.created_at <= cutoff,
+                        ),
+                    ),
+                )
+                .group_by(BroadcastDelivery.last_error_code),
+            ),
+        )
+        groups: dict[str, tuple[str, dict[str, object], int]] = {}
+        for kind, query in queries:
+            rows = (await session.execute(query)).all()
+            for raw_error_code, raw_affected in rows:
+                if not isinstance(raw_error_code, str):
+                    continue
+                affected = int(raw_affected)
+                digest = hashlib.sha256(raw_error_code.encode()).hexdigest()[:20]
+                fingerprint = f"{kind}:{digest}"
+                groups[fingerprint] = (
+                    kind,
+                    {"error_code": raw_error_code, "affected": affected},
+                    affected,
+                )
+        return groups
 
     def _now(self) -> datetime:
         now = self._clock.now()

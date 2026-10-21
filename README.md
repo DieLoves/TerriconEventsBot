@@ -20,6 +20,24 @@ uv run pytest
 
 Секреты хранятся только в `.env`, который исключён из Git.
 
+### Groq
+
+С этапа 9 используется только официальный SDK `groq`, модель по умолчанию —
+`openai/gpt-oss-120b`. Префикс модели не означает обращение к OpenAI API.
+Для существующей установки перенесите AI-настройки на `GROQ_*` по `.env.example`:
+старый `OPENAI_API_KEY` не используется, требуется ключ Groq.
+
+На Free цены `GROQ_INPUT_PRICE_PER_MILLION_USD` и
+`GROQ_OUTPUT_PRICE_PER_MILLION_USD` равны нулю; токены учитываются. Мягкий бюджет
+`GROQ_MONTHLY_BUDGET_USD` не ограничивает RPM/TPM/RPD/TPD. После перехода на платный
+тариф нужно самостоятельно настроить актуальные цены. Исторические расходы сохраняются
+в общем AI ledger; SQL-имя `openai_usage` оставлено для совместимости данных.
+
+Классификация и перевод используют строгий JSON Schema. Ошибки повторяются через
+очередь; `Retry-After` сохраняется в БД, перевод восстанавливается после рестарта
+без повторной классификации. Подбор квот и живая оценка 20–30 событий — этап 10.
+Результаты первой проверки: [Groq smoke](docs/operations/groq-smoke-2026-10-21.md).
+
 Read-only проверка всех шести тематических endpoint Terricon API:
 
 ```bash
@@ -33,7 +51,7 @@ uv run terricon-api-smoke
 Для запуска нужны Docker с Compose и заполненный `.env`. Безопасный начальный режим —
 `ACCESS_MODE=allowlist`; добавьте свой Telegram ID одновременно в `ADMIN_TELEGRAM_IDS` и
 `ALLOWED_TELEGRAM_IDS`. `ADMIN_CHAT_ID` можно оставить равным личному Telegram ID администратора.
-Обязательны действующие `TELEGRAM_BOT_TOKEN` и `OPENAI_API_KEY`; preflight перечислит только
+Обязательны действующие `TELEGRAM_BOT_TOKEN` и `GROQ_API_KEY`; preflight перечислит только
 имена отсутствующих или неверных полей и не напечатает их значения.
 
 `DATABASE_URL` из `.env` внутри Compose переопределяется адресом контейнера PostgreSQL. Пароль БД
@@ -76,3 +94,6 @@ docker compose down
 uv run alembic upgrade head
 uv run terricon-preflight
 ```
+
+Production backup, проверка восстановления, daily cron и последовательность ручного rollout
+описаны в [`docs/operations/deployment.md`](docs/operations/deployment.md).

@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, text, update
@@ -23,7 +24,12 @@ from terricon_events_bot.domain.enums import (
     Locale,
 )
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
-from terricon_events_bot.infrastructure.models import Broadcast, BroadcastDelivery, User
+from terricon_events_bot.infrastructure.models import (
+    Broadcast,
+    BroadcastDelivery,
+    NotificationOutbox,
+    User,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -63,6 +69,23 @@ class FakeGateway:
             return outcome
         self.next_id += 1
         return self.next_id
+
+
+class LockCheckingGateway(FakeGateway):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        super().__init__()
+        self._session_factory = session_factory
+
+    async def send_report(self, admin_telegram_id: int, text_value: str) -> int:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await session.scalar(select(Broadcast).with_for_update(nowait=True))
+        return await super().send_report(admin_telegram_id, text_value)
+
+
+class FailingReportGateway(FakeGateway):
+    async def send_report(self, admin_telegram_id: int, text_value: str) -> int:
+        raise TelegramSendError("report_network", transient=True)
 
 
 @pytest.fixture
@@ -189,6 +212,9 @@ async def test_broadcast_resumes_after_partial_delivery_and_stale_lease(
     assert second.sent == 1
     assert second_gateway.calls == [("text", 7_200_004, "A" * 1000)]
     assert len(second_gateway.reports) == 1
+    report = await service.report(draft.broadcast_id)
+    assert report is not None and report.transient == 1
+    assert "временных ошибок: 1" in second_gateway.reports[0][1]
 
 
 @pytest.mark.asyncio
@@ -205,6 +231,19 @@ async def test_telegram_block_closes_all_pending_broadcasts_for_user(
         await service.set_body(draft.broadcast_id, Locale.RU, body)
         await service.confirm(draft.broadcast_id)
         broadcast_ids.append(draft.broadcast_id)
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(
+                NotificationOutbox(
+                    user_id=user_id,
+                    batch_id=uuid4(),
+                    batch_key="broadcast-block-active-outbox",
+                    status=DeliveryStatus.PROCESSING,
+                    payload={"version": 1, "chunks": []},
+                    available_at=clock.current,
+                    locked_at=clock.current,
+                )
+            )
     gateway = FakeGateway([TelegramSendError("forbidden", blocked=True)])
     worker = BroadcastWorker(
         session_factory,
@@ -218,10 +257,13 @@ async def test_telegram_block_closes_all_pending_broadcasts_for_user(
         user = await session.get(User, user_id)
         deliveries = (await session.scalars(select(BroadcastDelivery))).all()
         broadcasts = (await session.scalars(select(Broadcast))).all()
+        outbox = await session.scalar(select(NotificationOutbox))
     assert result.blocked == 1
     assert user is not None and not user.is_active
     assert {delivery.status for delivery in deliveries} == {DeliveryStatus.BLOCKED}
     assert {broadcast.status for broadcast in broadcasts} == {BroadcastStatus.COMPLETED}
+    assert outbox is not None and outbox.status is DeliveryStatus.BLOCKED
+    assert outbox.locked_at is None
 
 
 @pytest.mark.asyncio
@@ -259,3 +301,90 @@ async def test_processing_delivery_without_lease_is_recovered_after_upgrade(
 
     assert result.sent == 1
     assert gateway.calls == [("text", 7_200_006, "Recovered")]
+
+
+@pytest.mark.asyncio
+async def test_completed_report_is_sent_without_holding_broadcast_transaction(
+    broadcast_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = broadcast_database
+    clock = FrozenClock(datetime(2030, 1, 1, 12, tzinfo=UTC))
+    service = BroadcastService(session_factory, clock=cast(Clock, clock))
+    draft = await service.create_draft(9_000_020, BroadcastAudience.RU)
+    await service.set_body(draft.broadcast_id, Locale.RU, "No recipients")
+    await service.confirm(draft.broadcast_id)
+    gateway = LockCheckingGateway(session_factory)
+    worker = BroadcastWorker(
+        session_factory,
+        cast(BroadcastGateway, gateway),
+        clock=cast(Clock, clock),
+    )
+
+    await worker.run_batch()
+
+    async with session_factory() as session:
+        broadcast = await session.get(Broadcast, draft.broadcast_id)
+    assert len(gateway.reports) == 1
+    assert broadcast is not None and broadcast.report_sent_at == clock.current
+    assert broadcast.report_locked_at is None
+
+
+@pytest.mark.asyncio
+async def test_failed_completed_report_is_retried_after_stale_lease(
+    broadcast_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = broadcast_database
+    clock = FrozenClock(datetime(2030, 1, 1, 12, tzinfo=UTC))
+    service = BroadcastService(session_factory, clock=cast(Clock, clock))
+    draft = await service.create_draft(9_000_021, BroadcastAudience.RU)
+    await service.set_body(draft.broadcast_id, Locale.RU, "Retry report")
+    await service.confirm(draft.broadcast_id)
+
+    failed_worker = BroadcastWorker(
+        session_factory,
+        cast(BroadcastGateway, FailingReportGateway()),
+        clock=cast(Clock, clock),
+    )
+    await failed_worker.run_batch()
+    gateway = FakeGateway()
+    restarted = BroadcastWorker(
+        session_factory,
+        cast(BroadcastGateway, gateway),
+        clock=cast(Clock, clock),
+    )
+    await restarted.run_batch()
+    assert gateway.reports == []
+
+    clock.current += timedelta(minutes=6)
+    await restarted.run_batch()
+
+    assert len(gateway.reports) == 1
+
+
+@pytest.mark.asyncio
+async def test_single_locale_broadcast_keeps_confirmed_audience_language(
+    broadcast_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = broadcast_database
+    user_id = await add_user(session_factory, 7_200_007, Locale.RU)
+    clock = FrozenClock(datetime(2030, 1, 1, 12, tzinfo=UTC))
+    service = BroadcastService(session_factory, clock=cast(Clock, clock))
+    draft = await service.create_draft(9_000_022, BroadcastAudience.RU)
+    await service.set_body(draft.broadcast_id, Locale.RU, "RU audience")
+    await service.confirm(draft.broadcast_id)
+    async with session_factory() as session:
+        async with session.begin():
+            user = await session.get(User, user_id, with_for_update=True)
+            assert user is not None
+            user.locale = Locale.KZ
+    gateway = FakeGateway()
+    worker = BroadcastWorker(
+        session_factory,
+        cast(BroadcastGateway, gateway),
+        clock=cast(Clock, clock),
+    )
+
+    result = await worker.run_batch()
+
+    assert result.sent == 1
+    assert gateway.calls == [("text", 7_200_007, "RU audience")]

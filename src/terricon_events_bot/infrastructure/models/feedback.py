@@ -32,6 +32,11 @@ class FeedbackTicket(Base):
             "updated_at",
             postgresql_where=text("status <> 'closed'"),
         ),
+        Index(
+            "ix_feedback_tickets_closed_at",
+            "closed_at",
+            postgresql_where=text("status = 'closed'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

@@ -58,7 +58,7 @@ class TranslationOutput(_StrictModel):
 
 
 @dataclass(frozen=True, slots=True)
-class OpenAIUsageData:
+class AIUsageData:
     input_tokens: int
     output_tokens: int
 
@@ -71,13 +71,27 @@ class OpenAIUsageData:
             or isinstance(self.output_tokens, bool)
             or self.output_tokens < 0
         ):
-            raise ValueError("OpenAI token counts must be nonnegative integers")
+            raise ValueError("AI token counts must be nonnegative integers")
+
+
+class AIAdapterError(RuntimeError):
+    def __init__(
+        self,
+        code: str,
+        usage: AIUsageData | None = None,
+        *,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(code)
+        self.code = code
+        self.usage = usage
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
 class ClassificationResult:
     output: ClassificationOutput
-    usage: OpenAIUsageData
+    usage: AIUsageData
     model: str
     prompt_version: str
     duration_ms: int
@@ -86,7 +100,7 @@ class ClassificationResult:
 @dataclass(frozen=True, slots=True)
 class TranslationResult:
     output: TranslationOutput
-    usage: OpenAIUsageData
+    usage: AIUsageData
     model: str
     prompt_version: str
     duration_ms: int

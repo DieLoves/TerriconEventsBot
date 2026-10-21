@@ -63,6 +63,7 @@ OFFICIAL_SITE_URL = "https://terricon.kz/"
 _BUTTON_TEXT_LIMIT = 60
 _TITLE_LIMIT = 180
 _DESCRIPTION_CHUNK_LIMIT = 2800
+_SCREEN_TEXT_LIMIT = 4096
 
 
 class TelegramViews:
@@ -623,12 +624,23 @@ class TelegramViews:
     def feedback_preview(self, user: User, draft: FeedbackDraft) -> Screen:
         locale = user.locale
         kind = self._text(locale, f"feedback.kind_{draft.kind.value}")
-        body = self._escape(draft.body or "")
         photo = self._text(locale, "common.yes" if draft.telegram_file_id else "common.no")
-        text = (
+        missing = self._text(locale, "feedback.not_specified")
+        display_name = self._escape(user.display_name or missing)
+        username = self._escape(f"@{user.username}" if user.username else missing)
+        prefix = (
             f"<b>{self._escape(self._text(locale, 'feedback.preview'))}</b>\n\n"
-            f"{self._escape(kind)}\n\n{body}\n\n📷 {self._escape(photo)}"
+            f"{self._escape(self._text(locale, 'feedback.preview_name'))}: {display_name}\n"
+            f"{self._escape(self._text(locale, 'feedback.preview_username'))}: {username}\n\n"
+            f"{self._escape(kind)}\n\n"
         )
+        suffix = f"\n\n📷 {self._escape(photo)}"
+        body_value = draft.body or ""
+        body = self._escape(body_value)
+        body_limit = _SCREEN_TEXT_LIMIT - len(prefix) - len(suffix)
+        if len(body) > body_limit:
+            body = f"{split_html_chunks(body_value, limit=body_limit - 1)[0]}…"
+        text = f"{prefix}{body}{suffix}"
         return Screen(
             text=text,
             keyboard=self._keyboard(

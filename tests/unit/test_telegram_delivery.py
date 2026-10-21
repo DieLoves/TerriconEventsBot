@@ -68,3 +68,21 @@ async def test_aiogram_gateway_classifies_delivery_errors(
     assert captured.value.transient is transient
     assert captured.value.blocked is blocked
     assert captured.value.retry_after == retry_after
+
+
+@pytest.mark.asyncio
+async def test_retry_after_is_bounded_before_timedelta_conversion() -> None:
+    bot = Mock(spec=Bot)
+    bot.send_message = AsyncMock(
+        side_effect=TelegramRetryAfter(
+            SendMessage(chat_id=1, text="x"),
+            "later",
+            10**100,
+        )
+    )
+    gateway = AiogramTelegramGateway(cast(Any, bot))
+
+    with pytest.raises(TelegramSendError) as captured:
+        await gateway.send_message(100, "message")
+
+    assert captured.value.retry_after == timedelta(days=1)

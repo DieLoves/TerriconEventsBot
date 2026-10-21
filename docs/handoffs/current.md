@@ -1,123 +1,120 @@
 # Handoff
 
-## Objective
+## Groq — текущее дополнение 2026-10-21
 
-По явному указанию пользователя следующая сессия должна сначала проверить, закоммитить и
-отправить в `origin/main` **все** текущие изменения. Затем нужно отдельно подтвердить, есть ли в
-репозитории временные заглушки пробного запуска, удалить только реально временные элементы и
-продолжить оставшуюся часть этапа 8 по `docs/plans/terricon-events-bot-v1.md`.
+Этап 9 завершён локально: `openai` SDK полностью удалён; используется `groq==0.37.1`,
+`AsyncGroq`/Chat Completions и `openai/gpt-oss-120b`, strict JSON Schema + Pydantic.
+Все AI-настройки теперь `GROQ_*`; цены Free по умолчанию 0/0, usage сохраняется.
+Физические SQL-имена `openai_usage`/`openai_operation` сохранены для совместимости;
+новых миграций не требуется. Runtime и admin используют нейтральные AI-типы.
 
-Этот handoff создан навыком `$handoff`; поэтому commit, push и реализация в текущем ходе не
-выполнялись.
+`Retry-After` сохраняется в очереди; 429 останавливает batch. Перевод имеет durable
+retry/lease на completed classification и восстанавливается без переклассификации
+и дублей уведомлений. Официальная локаль и 24-часовой deadline прекращают retry.
+Malformed ответы нормализуются, SDK debug dumps исключены из application logs.
 
-## Current state
+Финальный gate: **235 passed** с отдельной PostgreSQL 17; Ruff/format/mypy/lock/diff,
+package build и Docker build PASS. В venv и проверочном Docker-образе OpenAI SDK
+отсутствует. Независимое review выявило 3 Important; все воспроизведены и исправлены,
+после чего suite повторён; повторное независимое review не выполнялось.
 
-- Этапы 1–6 находятся в `main`; HEAD и локальный `origin/main` указывают на
-  `21091d4 feat: add catalog subscriptions and reliable delivery`.
-- Этап 7 завершён, но вместе с уже реализованной частью этапа 8 остаётся в незакоммиченном
-  рабочем дереве.
-- Этап 8 фактически уже начат: runtime, scheduler, lifecycle, heartbeat, healthcheck и Docker
-  Compose реализованы. Не начинать его заново; продолжать с оставшихся operations-задач.
-- `.env` игнорируется Git. Его актуальные значения в этом handoff не проверялись; не выводить,
-  не коммитить и не перезаписывать секреты.
-- Пользователь уже пробовал Docker-запуск и получил `InvalidPasswordError` для PostgreSQL.
-  Причина была диагностирована как несовпадение нового `POSTGRES_PASSWORD` с паролем в ранее
-  инициализированном persistent volume. Текущее состояние контейнеров и разрешение этой ошибки
-  после последующих действий пользователя не проверялись.
+С разрешения пользователя выполнены 3 реальных Groq-запроса: RU/KZ classification,
+RU → KZ translation, HTTP 200, 1230 токенов, 334–607 мс. Ключ вводился скрыто только
+в процесс и не сохранялся. `.env` не менялся. Для запуска отдельно настроить
+`GROQ_API_KEY`; старые `OPENAI_*` не используются. Бот не запускался.
 
-## Completed
+Этап 10 открыт: 20–30 размеченных реальных событий, оба направления перевода,
+полная проверка квот и общий throttling. Первые 3 synthetic smoke этого не заменяют.
+Истина: `docs/specs/groq-migration.md`, `docs/plans/groq-migration.md`,
+`docs/operations/groq-smoke-2026-10-21.md`. По запросу пользователя от 2026-10-21
+Groq и все прежние audit/operations-изменения подготовлены к commit/push.
+Статус публикации указан ниже; production rollout не выполнялся.
 
-- Этап 7: DB-backed feedback, privacy deletion, admin-команды и restart-safe локализованные
-  broadcasts с lease, per-message acknowledgement и итоговым отчётом. См. application/Telegram
-  файлы и миграцию `alembic/versions/0009_stage7_broadcast_state.py`.
-- Текущая часть этапа 8: `terricon-bot`, `terricon-preflight`, `terricon-healthcheck`, aiogram
-  polling, APScheduler jobs, PostgreSQL advisory locks, graceful shutdown, heartbeat/admin alerts.
-- Добавлены multi-stage non-root `Dockerfile`, `compose.yaml`, `.dockerignore`, migration service,
-  persistent PostgreSQL volume и container healthcheck.
-- Конфигурация валидирует Telegram token и PostgreSQL URL до создания клиентов; ошибки settings
-  перечисляют поля без значений секретов.
-- README содержит порядок первого Docker-запуска и остановки без удаления volume.
+## Objective (исходные этапы 1–8)
 
-## Key decisions
+Спецификация `docs/specs/terricon-events-bot.md` и основной план
+`docs/plans/terricon-events-bot-v1.md` полностью сопоставлены с кодом, миграциями, тестами,
+Docker/runtime и operations-документацией. Найденные compliance- и hardening-расхождения
+устранены; оба постреализационных аудита завершены.
 
-- Очереди и прогресс остаются в PostgreSQL; APScheduler только запускает обработчики.
-- Sync, classification и broadcast защищены advisory locks и `max_instances=1`.
-- Compose переопределяет `DATABASE_URL` адресом сервиса `db` и строит его из
-  `POSTGRES_PASSWORD`. Смена переменной не меняет пароль в уже созданном PostgreSQL volume.
-- Не выполнять `docker compose down -v` без явного подтверждения потери данных.
-- По поиску репозитория временных кодовых заглушек пробного запуска не обнаружено. Временные
-  credentials использовались только как process-local environment overrides для container
-  preflight и в файлы не записывались.
-- `replace-me`/примерные ID в `.env.example` — документированные placeholders, а `TODO` в
-  `locales/kz.yaml` — предусмотренный спецификацией RU fallback/readiness gate. Не удалять их как
-  «тестовые заглушки» без отдельного решения пользователя.
+## Git state — публикация 2026-10-21
 
-## Relevant files
+- Исходная база: `1f0b955 feat: add administration and production runtime`.
+- Пользователь разрешил commit/push в существующий `origin/main`:
+  `git@github.com:DieLoves/TerriconEventsBot.git`. Перед публикацией выполнен fetch,
+  расхождений между HEAD и origin/main нет.
+- В публикацию входят operations-дополнения этапа 8, compliance/hardening, migration
+  `0010_hardening_queue_state`, assets, документация и Groq этап 9.
+- Публикация подготовлена; результат push и SHA фиксируются после подтверждения remote.
+- `.env` игнорируется Git; его содержимое не выводилось и не менялось.
 
-- Спецификация: `docs/specs/terricon-events-bot.md`.
-- План: `docs/plans/terricon-events-bot-v1.md`.
-- Runtime/operations: `src/terricon_events_bot/runtime.py`,
-  `src/terricon_events_bot/application/operations.py`.
-- Composition/config: `src/terricon_events_bot/composition.py`,
-  `src/terricon_events_bot/config.py`.
-- Этап 7: `src/terricon_events_bot/application/{admin,broadcasts,feedback}.py`,
-  `src/terricon_events_bot/telegram/{admin,broadcasts,feedback}.py`.
-- Containers: `Dockerfile`, `compose.yaml`, `.dockerignore`, `.env.example`.
-- Operations tests: `tests/integration/test_operations_service.py`,
-  `tests/unit/test_runtime.py`.
+## Завершённые operations/audit-изменения после исходной базы
 
-## Repository state
+- Добавлены host backup/rotation и isolated restore smoke, daily cron и production rollout
+  runbook.
+- Исправлена конкурентная блокировка broadcast claims: `FOR UPDATE SKIP LOCKED` блокирует
+  только `broadcast_deliveries`.
+- Feedback preview теперь показывает имя и `@username`; ответы администратора и закрытие тикета
+  используют locale пользователя. Список тикетов отражает текущую feedback-блокировку.
+- `/status` показывает состояние, число последовательных ошибок, последний успех и код ошибки
+  каждого Terricon endpoint.
+- Итоговый отчёт рассылки считает получателей, для которых потребовался transient retry.
+- Зарегистрирован отдельный cron job выпуска накопленного ночного дайджеста во время окончания
+  quiet hours.
+- Долгие GPT/outbox/broadcast-сбои агрегируются и дедуплицируются в `admin_alerts`.
+- Повторяющаяся недоступность PostgreSQL вызывает сгруппированный прямой runtime-alert, так как
+  сохранить его в недоступной БД невозможно.
+- Добавлены нейтральные общие bitmap-assets главного меню и всех девяти категорий без логотипов,
+  текста или утверждения официального статуса.
+- Materialization уведомлений ждёт завершения классификации, поэтому важное изменение выбирает
+  подписчиков по финальному объединению старых и новых категорий без гонки с GPT worker.
+- Feedback preview гарантированно укладывается в Telegram text limit после HTML-экранирования,
+  не обрезая сохраняемый текст обращения.
+- Первый runtime sync получает audit-trigger `startup`, последующие — `scheduled`.
+- Получатели broadcast материализуются атомарным `INSERT ... SELECT` без загрузки всех user ID
+  в память приложения.
+- Из финального Docker image удалён неиспользуемый `pip` и его уязвимый vendored-код.
+- Корректирующий план сохранён в
+  `docs/plans/terricon-events-bot-v1-compliance-audit.md` и отмечен завершённым.
+- Hardening-план сохранён в `docs/plans/terricon-events-bot-v1-hardening-audit.md` и отмечен
+  завершённым.
 
-- Root: `/home/dev/workspace/projects/terriconparser`.
-- Branch: `main`, tracking `origin/main`; inspected ahead/behind count: `0/0`.
-- HEAD: `21091d4`.
-- Рабочее дерево существенно изменено: 23 tracked-файла modified и новые файлы этапов 7–8
-  (migration, application/Telegram services, Docker/runtime и tests). Перед staging использовать
-  `git status --short` как источник истины и просмотреть полный diff.
-- `.env` не отображается в status и не должен попасть в commit.
+## Validation (до перехода на Groq, историческая проверка)
 
-## Validation
+- Полный PostgreSQL 17 test suite: `209 passed`.
+- Ruff check и Ruff format check: passed (`112 files`).
+- mypy strict: passed (`53 source files`).
+- `uv lock --offline --check`, `bash -n` и `git diff --check`: passed.
+- `pip-audit` production dependency set: известных уязвимостей нет.
+- Trivy scan фактического runtime rootfs: 0 исправляемых HIGH/CRITICAL находок для Debian 13.7
+  и Python-пакетов.
+- Docker Compose config и application image build: passed; runtime работает без `pip`.
+- Container migrations, preflight и healthcheck: passed; healthcheck вернул database/schema/
+  heartbeat = true.
+- Реальный backup/restore smoke: revision `0010_hardening_queue_state`, 25 public tables.
+- Read-only live Terricon smoke: шесть endpoint успешны; на момент проверки каждый вернул
+  0 записей и 0 невалидных записей с первой попытки.
+- Временный backup и одноразовый PostgreSQL-контейнер после smoke удалены.
 
-Фактически выполненные проверки до создания этого handoff:
+## Expected launch gates
 
-- полный PostgreSQL 17 gate: `186 passed`;
-- Ruff check и Ruff format check: passed;
-- mypy strict: passed;
-- `uv lock --offline --check`: passed;
-- `git diff --check`: passed, в том числе повторно при подготовке handoff;
-- Alembic: одна head `0009_stage7_broadcast_state`; clean migration прошла;
-- `docker compose config --quiet` и multi-stage image build: passed;
-- container preflight с временными environment overrides: `Preflight OK`;
-- реальные Telegram, OpenAI и Terricon вызовы в автоматических проверках не выполнялись.
+- `locales/kz.yaml` намеренно содержит TODO-шаблоны и использует RU fallback в закрытой beta.
+  Public mode остаётся заблокирован автоматической проверкой до пользовательской верификации KZ.
+- Реальные Telegram-вызовы не выполнялись. Groq: только smoke 3/3; полная живая
+  приёмка качества и квот этапа 10 ещё не выполнена.
+- Production rollout не выполнялся; для него нужны отдельное разрешение и доступ к VPS.
 
-Новый полный тестовый прогон специально для handoff не запускался.
+## Runtime state
 
-## Known issues / blockers
+- Локальная Compose-БД запущена и healthy; application container не запускался в polling mode.
+- На проверке 2026-10-21 контейнер `terricon-events-bot-db-1` healthy; приложение
+  Terricon не запущено. Старого `terricon-hardening-test-db` больше нет.
+- Проверочный образ `terricon-events-bot:groq-test` собран; production-контейнеры
+  не пересоздавались. PostgreSQL для публикационной регрессии одноразовая и изолированная.
+- Остальные проекты и их контейнеры не менялись.
 
-- Перед commit нужно просмотреть весь diff: изменения этапов 7 и 8 накоплены вместе и ещё ни разу
-  не зафиксированы после `21091d4`.
-- Состояние локального `.env` неизвестно; прежнее утверждение о конкретно отсутствующих полях могло
-  устареть после ручной настройки пользователем.
-- PostgreSQL volume может по-прежнему содержать пароль от первоначальной инициализации. Сначала
-  проверить текущее состояние, не удалять volume автоматически.
-- KZ locale содержит предусмотренные спецификацией `TODO`; public KZ mode должен оставаться
-  заблокированным readiness gate.
-- Этап 8 ещё не завершён: отсутствуют host `pg_dump`, ротация семи архивов, restore smoke и
-  production rollout runbook.
+## Next step
 
-## Remaining work
-
-1. Проверить diff/status, убедиться в отсутствии секретов, закоммитить все изменения и выполнить
-   `git push origin main` — пользователь явно запросил push.
-2. После push провести адресный аудит «заглушек». Не считать временными `.env.example` и KZ TODO
-   автоматически; сначала сопоставить каждый кандидат со спецификацией.
-3. Продолжить оставшуюся часть этапа 8: backup/rotation, restore smoke и deploy/rollout docs.
-4. После каждого логического шага запускать соответствующие проверки; в конце этапа — полный gate
-   и остановка перед дальнейшей работой.
-
-## Next recommended step
-
-Начать с `git status --short` и полного staged/unstaged diff-аудита. Если секретов и случайных
-файлов нет, добавить все изменения, ещё раз просмотреть staged diff, создать commit(ы) этапов 7 и
-текущей части этапа 8 и выполнить разрешённый пользователем `git push origin main`. Только после
-успешного push переходить к аудиту заглушек.
+Продолжить этап 10 по `docs/plans/groq-migration.md`: качество реальных событий,
+обратный KZ → RU перевод и общие квоты. Commit/push разрешены пользователем
+2026-10-21; production rollout требует отдельного поручения.

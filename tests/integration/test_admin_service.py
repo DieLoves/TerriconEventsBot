@@ -10,16 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from terricon_events_bot.application.admin import AdminService
 from terricon_events_bot.domain.enums import (
+    AIOperation,
     ClassificationStatus,
     Locale,
-    OpenAIOperation,
     SourceTheme,
+    SyncEndpointStatus,
 )
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
 from terricon_events_bot.infrastructure.models import (
+    AIUsage,
     Event,
     EventClassification,
-    OpenAIUsage,
+    SyncEndpointState,
     User,
 )
 
@@ -34,6 +36,7 @@ async def admin_database(
     async with engine.begin() as connection:
         await connection.execute(text("TRUNCATE TABLE users, events RESTART IDENTITY CASCADE"))
         await connection.execute(text("TRUNCATE TABLE openai_usage RESTART IDENTITY CASCADE"))
+        await connection.execute(text("TRUNCATE TABLE sync_endpoint_states"))
     try:
         yield engine, create_session_factory(engine)
     finally:
@@ -41,6 +44,7 @@ async def admin_database(
             await connection.execute(
                 text("TRUNCATE TABLE users, events, openai_usage RESTART IDENTITY CASCADE")
             )
+            await connection.execute(text("TRUNCATE TABLE sync_endpoint_states"))
         await engine.dispose()
 
 
@@ -92,9 +96,9 @@ async def test_admin_stats_and_manual_reclassification_reset_queue_state(
                 )
             )
             session.add(
-                OpenAIUsage(
+                AIUsage(
                     event_id=event.id,
-                    operation=OpenAIOperation.CLASSIFICATION,
+                    operation=AIOperation.CLASSIFICATION,
                     model="model",
                     input_tokens=10,
                     output_tokens=5,
@@ -113,10 +117,46 @@ async def test_admin_stats_and_manual_reclassification_reset_queue_state(
     assert stats.users == 2
     assert stats.active_users == 1
     assert stats.events == 1
-    assert stats.openai_cost_usd == Decimal("1.250000000")
+    assert stats.ai_cost_usd == Decimal("1.250000000")
     assert classification is not None
     assert classification.status is ClassificationStatus.PENDING
     assert classification.semantic_hash == "a" * 64
     assert classification.attempts == 0
     assert classification.result_metadata["manual_reclassify"] is True
     assert classification.result_metadata["notify_new"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_status_exposes_each_sync_endpoint(
+    admin_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = admin_database
+    now = datetime.now(UTC)
+    async with session_factory() as session:
+        async with session.begin():
+            session.add_all(
+                [
+                    SyncEndpointState(
+                        locale=Locale.RU,
+                        source_theme=SourceTheme.IT,
+                        last_status=SyncEndpointStatus.SUCCEEDED,
+                        last_success_at=now,
+                    ),
+                    SyncEndpointState(
+                        locale=Locale.KZ,
+                        source_theme=SourceTheme.BUSINESS,
+                        last_status=SyncEndpointStatus.FAILED,
+                        consecutive_failures=2,
+                        last_error_code="timeout",
+                    ),
+                ]
+            )
+
+    status = await AdminService(session_factory).status()
+
+    assert status.endpoint_failures == 1
+    assert len(status.endpoints) == 2
+    failed = next(endpoint for endpoint in status.endpoints if endpoint.last_error_code)
+    assert failed.locale is Locale.KZ
+    assert failed.source_theme is SourceTheme.BUSINESS
+    assert failed.consecutive_failures == 2

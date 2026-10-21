@@ -14,6 +14,7 @@ _SENSITIVE_KEYS = {
     "bot_token",
     "feedback_text",
     "message_text",
+    "groq_api_key",
     "openai_api_key",
     "telegram_id",
     "token",
@@ -100,6 +101,9 @@ class JsonFormatter(logging.Formatter):
 def configure_logging(level: str, secrets: Iterable[str] = ()) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter(Redactor(secrets)))
+    # SDK debug request/response dumps include entire prompts. Keep application
+    # error codes, but never forward SDK records even with a DEBUG child logger.
+    handler.addFilter(lambda record: record.name != "groq" and not record.name.startswith("groq."))
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)

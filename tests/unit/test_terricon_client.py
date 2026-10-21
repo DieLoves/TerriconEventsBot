@@ -91,6 +91,32 @@ async def test_fetch_honors_initial_request_plus_three_retries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_retries_transport_protocol_errors() -> None:
+    calls = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.RemoteProtocolError("truncated response", request=request)
+        return httpx.Response(200, json=fixture_payload(), request=request)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    client, http_client = make_client(handler, sleep=sleep, random_uniform=lambda _a, _b: 0.0)
+    try:
+        payload = await client.fetch_detailed(Locale.RU, SourceTheme.IT)
+    finally:
+        await http_client.aclose()
+
+    assert calls == 2
+    assert delays == [1.0]
+    assert payload.attempts == 2
+
+
+@pytest.mark.asyncio
 async def test_fetch_honors_http_date_retry_after() -> None:
     calls = 0
     delays: list[float] = []
@@ -234,6 +260,30 @@ async def test_response_body_and_retry_after_are_bounded() -> None:
 
     assert delays == [30]
     assert caught.value.code == "response_too_large"
+
+
+@pytest.mark.asyncio
+async def test_non_finite_retry_after_falls_back_to_exponential_delay() -> None:
+    calls = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, headers={"Retry-After": "NaN"}, request=request)
+        return httpx.Response(200, json=fixture_payload(), request=request)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    client, http_client = make_client(handler, sleep=sleep, random_uniform=lambda _a, _b: 0.0)
+    try:
+        await client.fetch_detailed(Locale.RU, SourceTheme.IT)
+    finally:
+        await http_client.aclose()
+
+    assert delays == [1.0]
 
 
 @pytest.mark.asyncio

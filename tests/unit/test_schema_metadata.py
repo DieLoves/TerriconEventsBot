@@ -47,10 +47,16 @@ def test_critical_indexes_are_declared() -> None:
         "ix_event_categories_category_event_id",
         "ix_notification_outbox_pending_available",
         "ix_notification_outbox_claimable",
+        "ix_notification_outbox_active_user_id",
+        "ix_notification_deliveries_outbox_id_status",
+        "ix_notification_deliveries_unbundled_user_id_id",
         "ix_domain_changes_unmaterialized",
         "ix_broadcast_deliveries_claimable",
+        "ix_broadcast_deliveries_active_user_id",
         "ix_feedback_tickets_open_updated_at",
+        "ix_feedback_tickets_closed_at",
         "ix_broadcasts_unfinished_updated_at",
+        "ix_broadcasts_pending_report",
     } <= index_names
 
 
@@ -84,7 +90,7 @@ def test_alembic_history_is_linear_and_has_expected_head() -> None:
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
     revisions = list(scripts.walk_revisions(base="base", head="heads"))
 
-    assert scripts.get_heads() == ["0009_stage7_broadcast_state"]
+    assert scripts.get_heads() == ["0010_hardening_queue_state"]
     assert [revision.revision for revision in reversed(revisions)] == [
         "0001_core",
         "0002_sync_subscriptions",
@@ -95,6 +101,7 @@ def test_alembic_history_is_linear_and_has_expected_head() -> None:
         "0007_openai_cost_precision",
         "0008_stage6_delivery_state",
         "0009_stage7_broadcast_state",
+        "0010_hardening_queue_state",
     ]
 
 
@@ -111,5 +118,6 @@ def test_broadcast_schema_tracks_restart_and_final_report_progress() -> None:
     deliveries = Base.metadata.tables["broadcast_deliveries"]
 
     assert "report_sent_at" in broadcasts.c
+    assert "report_locked_at" in broadcasts.c
     assert "locked_at" in deliveries.c
     assert "telegram_message_ids" in deliveries.c

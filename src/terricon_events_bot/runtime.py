@@ -16,11 +16,13 @@ from uuid import uuid4
 from aiogram import Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from terricon_events_bot.application.operations import (
     AdminAlertService,
     JobAlreadyRunningError,
     OperationsService,
+    RuntimeFailureAlertService,
     SchemaNotReadyError,
 )
 from terricon_events_bot.composition import Foundation, build_foundation
@@ -42,16 +44,21 @@ class RuntimeJobs:
         foundation: Foundation,
         operations: OperationsService,
         alerts: AdminAlertService,
+        runtime_alerts: RuntimeFailureAlertService,
     ) -> None:
         self._foundation = foundation
         self._operations = operations
         self._alerts = alerts
+        self._runtime_alerts = runtime_alerts
         self._active: set[asyncio.Task[Any]] = set()
+        self._startup_sync_pending = True
 
     async def sync(self) -> None:
+        trigger = SyncTrigger.STARTUP if self._startup_sync_pending else SyncTrigger.SCHEDULED
+        self._startup_sync_pending = False
         await self._guarded(
             "sync",
-            lambda: self._foundation.sync_service.run(SyncTrigger.SCHEDULED),
+            lambda: self._foundation.sync_service.run(trigger),
         )
 
     async def classification(self) -> None:
@@ -64,12 +71,15 @@ class RuntimeJobs:
         )
 
     async def notifications(self) -> None:
-        async def operation() -> tuple[object, object]:
-            materialized = await self._foundation.outbox_service.materialize()
-            delivered = await self._foundation.delivery_worker.run_batch()
-            return materialized, delivered
+        await self._guarded("notifications", self._deliver_notifications)
 
-        await self._guarded("notifications", operation)
+    async def night_digest(self) -> None:
+        await self._guarded("night_digest", self._deliver_notifications)
+
+    async def _deliver_notifications(self) -> tuple[object, object]:
+        materialized = await self._foundation.outbox_service.materialize()
+        delivered = await self._foundation.delivery_worker.run_batch()
+        return materialized, delivered
 
     async def broadcasts(self) -> None:
         await self._guarded(
@@ -101,9 +111,13 @@ class RuntimeJobs:
             "admin_alerts",
             lambda: self._foundation.job_coordinator.run(
                 "admin_alerts",
-                self._alerts.dispatch,
+                self._refresh_and_dispatch_alerts,
             ),
         )
+
+    async def _refresh_and_dispatch_alerts(self) -> int:
+        await self._alerts.refresh_operational()
+        return await self._alerts.dispatch()
 
     async def drain(self) -> None:
         active = tuple(task for task in self._active if not task.done())
@@ -131,7 +145,20 @@ class RuntimeJobs:
                 "Scheduled job failed",
                 extra={"error_code": type(error).__name__, "job": name},
             )
+            component = f"postgresql/{name}" if isinstance(error, SQLAlchemyError) else name
+            try:
+                await self._runtime_alerts.failed(component, type(error).__name__)
+            except Exception as alert_error:
+                _LOGGER.warning(
+                    "Runtime failure alert could not be sent",
+                    extra={
+                        "error_code": type(alert_error).__name__,
+                        "job": name,
+                    },
+                )
         else:
+            self._runtime_alerts.recovered(f"postgresql/{name}")
+            self._runtime_alerts.recovered(name)
             if result is None and name in {"classification", "broadcasts", "admin_alerts"}:
                 _LOGGER.info(
                     "Scheduled job skipped because its advisory lock is busy",
@@ -170,6 +197,15 @@ def build_scheduler(settings: Settings, jobs: RuntimeJobs) -> AsyncIOScheduler:
         seconds=_QUEUE_INTERVAL_SECONDS,
         next_run_time=now + timedelta(seconds=10),
         id="notifications",
+        **common,
+    )
+    scheduler.add_job(
+        jobs.night_digest,
+        "cron",
+        hour=settings.quiet_hours_end.hour,
+        minute=settings.quiet_hours_end.minute,
+        second=settings.quiet_hours_end.second,
+        id="night_digest",
         **common,
     )
     scheduler.add_job(
@@ -215,10 +251,9 @@ async def run_bot(settings: Settings, project_root: Path) -> None:
         instance_id=instance_id,
         version=_package_version(),
     )
-    alerts = AdminAlertService(
-        foundation.session_factory,
-        AiogramAdminAlertGateway(foundation.bot, settings.resolved_admin_chat_id),
-    )
+    alert_gateway = AiogramAdminAlertGateway(foundation.bot, settings.resolved_admin_chat_id)
+    alerts = AdminAlertService(foundation.session_factory, alert_gateway)
+    runtime_alerts = RuntimeFailureAlertService(alert_gateway)
     scheduler: AsyncIOScheduler | None = None
     jobs: RuntimeJobs | None = None
     dispatcher = Dispatcher()
@@ -226,7 +261,7 @@ async def run_bot(settings: Settings, project_root: Path) -> None:
     try:
         await operations.preflight()
         await operations.heartbeat(details={"state": "starting"})
-        jobs = RuntimeJobs(foundation, operations, alerts)
+        jobs = RuntimeJobs(foundation, operations, alerts, runtime_alerts)
         scheduler = build_scheduler(settings, jobs)
         scheduler.start()
         _LOGGER.info("Bot polling started", extra={"access_mode": settings.access_mode.value})
@@ -321,7 +356,7 @@ def _configure_runtime_logging(settings: Settings) -> None:
         settings.log_level,
         (
             settings.telegram_bot_token.get_secret_value(),
-            settings.openai_api_key.get_secret_value(),
+            settings.groq_api_key.get_secret_value(),
             settings.database_url.get_secret_value(),
         ),
     )

@@ -24,7 +24,10 @@ from terricon_events_bot.application.subscriptions import (
     SubscriptionService,
 )
 from terricon_events_bot.domain.enums import (
+    BroadcastAudience,
+    BroadcastStatus,
     CategorySlug,
+    ClassificationStatus,
     DeliveryStatus,
     Locale,
     NotificationType,
@@ -32,8 +35,11 @@ from terricon_events_bot.domain.enums import (
 )
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
 from terricon_events_bot.infrastructure.models import (
+    Broadcast,
+    BroadcastDelivery,
     DomainChange,
     Event,
+    EventClassification,
     EventLocalization,
     NotificationDelivery,
     NotificationOutbox,
@@ -245,6 +251,82 @@ async def test_materialization_uses_category_union_and_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_materialization_waits_for_categories_from_pending_classification(
+    delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = delivery_database
+    old_user = await add_user(
+        session_factory,
+        4100101,
+        SubscriptionMode.CATEGORIES,
+        (CategorySlug.AI_DATA,),
+    )
+    new_user = await add_user(
+        session_factory,
+        4100102,
+        SubscriptionMode.CATEGORIES,
+        (CategorySlug.MARKETING_SALES,),
+    )
+    event_id = await add_event(
+        session_factory,
+        5100101,
+        "Reclassified event",
+        datetime(2030, 1, 5, tzinfo=UTC),
+    )
+    change_id = await add_change(
+        session_factory,
+        event_id,
+        2,
+        NotificationType.IMPORTANT_CHANGE,
+        old_categories=(CategorySlug.AI_DATA,),
+        new_categories=(CategorySlug.AI_DATA,),
+        change_data={"titles": {"old": "Old", "new": "New"}},
+    )
+    now = datetime(2030, 1, 1, 7, tzinfo=UTC)
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(
+                EventClassification(
+                    event_id=event_id,
+                    status=ClassificationStatus.PENDING,
+                    semantic_hash="pending-hash",
+                    first_attempt_at=now,
+                    next_attempt_at=now,
+                    result_metadata={"queued_revision": 2},
+                )
+            )
+    service = outbox_service(session_factory, FrozenClock(now))
+
+    pending = await service.materialize()
+
+    async with session_factory() as session:
+        change = await session.get(DomainChange, change_id)
+        assert change is not None and change.materialized_at is None
+    async with session_factory() as session:
+        async with session.begin():
+            classification = await session.get(
+                EventClassification,
+                event_id,
+                with_for_update=True,
+            )
+            assert classification is not None
+            classification.status = ClassificationStatus.COMPLETED
+            change = await session.get(DomainChange, change_id, with_for_update=True)
+            assert change is not None
+            change.new_categories = [CategorySlug.MARKETING_SALES.value]
+
+    completed = await service.materialize()
+
+    async with session_factory() as session:
+        recipient_ids = set(await session.scalars(select(NotificationDelivery.user_id)))
+
+    assert pending.changes == pending.deliveries == pending.outboxes == 0
+    assert completed.changes == 1
+    assert completed.deliveries == completed.outboxes == 2
+    assert recipient_ids == {old_user, new_user}
+
+
+@pytest.mark.asyncio
 async def test_change_without_recipients_is_not_replayed_to_future_subscriber(
     delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
@@ -397,6 +479,25 @@ async def test_forbidden_deactivates_user_and_closes_all_pending_delivery(
             new_categories=(CategorySlug.OTHER,),
         )
         await service.materialize()
+    async with session_factory() as session:
+        async with session.begin():
+            broadcast = Broadcast(
+                created_by_telegram_id=9990001,
+                audience=BroadcastAudience.RU,
+                status=BroadcastStatus.READY,
+                total_count=1,
+            )
+            session.add(broadcast)
+            await session.flush()
+            session.add(
+                BroadcastDelivery(
+                    broadcast_id=broadcast.id,
+                    user_id=user_id,
+                    status=DeliveryStatus.PENDING,
+                    next_attempt_at=clock.now(),
+                )
+            )
+            broadcast_id = broadcast.id
     worker = DeliveryWorker(
         session_factory,
         FakeGateway([TelegramSendError("forbidden", blocked=True)]),
@@ -409,11 +510,19 @@ async def test_forbidden_deactivates_user_and_closes_all_pending_delivery(
         user = await session.get(User, user_id)
         outbox_statuses = (await session.scalars(select(NotificationOutbox.status))).all()
         delivery_statuses = (await session.scalars(select(NotificationDelivery.status))).all()
+        broadcast = await session.get(Broadcast, broadcast_id)
+        broadcast_delivery_status = await session.scalar(
+            select(BroadcastDelivery.status).where(BroadcastDelivery.broadcast_id == broadcast_id)
+        )
 
     assert result.blocked == 1
     assert user is not None and not user.is_active
     assert outbox_statuses == [DeliveryStatus.BLOCKED, DeliveryStatus.BLOCKED]
     assert delivery_statuses == [DeliveryStatus.BLOCKED, DeliveryStatus.BLOCKED]
+    assert broadcast is not None
+    assert broadcast.status is BroadcastStatus.COMPLETED
+    assert broadcast.failed_count == 1
+    assert broadcast_delivery_status is DeliveryStatus.BLOCKED
 
 
 @pytest.mark.asyncio
@@ -450,6 +559,68 @@ async def test_permanent_error_is_failed_once_and_never_retried(
     assert len(gateway.calls) == 1
     assert outbox_status is DeliveryStatus.FAILED
     assert delivery_status is DeliveryStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_incomplete_payload_fails_all_unrepresented_deliveries(
+    delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = delivery_database
+    await add_user(session_factory, 4100013, SubscriptionMode.ALL)
+    clock = FrozenClock(datetime(2030, 1, 1, 7, tzinfo=UTC))
+    for offset in range(2):
+        event_id = await add_event(
+            session_factory,
+            5100041 + offset,
+            f"Incomplete {offset}",
+            datetime(2030, 1, 5 + offset, tzinfo=UTC),
+        )
+        await add_change(
+            session_factory,
+            event_id,
+            1,
+            NotificationType.NEW_EVENT,
+            new_categories=(CategorySlug.OTHER,),
+        )
+    await outbox_service(session_factory, clock).materialize()
+    async with session_factory() as session:
+        async with session.begin():
+            outbox = await session.scalar(select(NotificationOutbox).with_for_update())
+            delivery_ids = tuple(
+                (
+                    await session.scalars(
+                        select(NotificationDelivery.id).order_by(NotificationDelivery.id)
+                    )
+                ).all()
+            )
+            assert outbox is not None
+            outbox.payload = {
+                "version": 1,
+                "chunks": [{"text": "partial", "delivery_ids": [delivery_ids[0]]}],
+            }
+
+    result = await DeliveryWorker(
+        session_factory, FakeGateway(), clock=cast(Clock, clock)
+    ).run_batch()
+
+    async with session_factory() as session:
+        outbox = await session.scalar(select(NotificationOutbox))
+        deliveries = (
+            await session.execute(
+                select(NotificationDelivery.status, NotificationDelivery.last_error_code).order_by(
+                    NotificationDelivery.id
+                )
+            )
+        ).all()
+
+    assert result.failed == 1
+    assert outbox is not None
+    assert outbox.status is DeliveryStatus.FAILED
+    assert outbox.locked_at is None
+    assert deliveries == [
+        (DeliveryStatus.SENT, None),
+        (DeliveryStatus.FAILED, "incomplete_payload"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -493,9 +664,11 @@ async def test_concurrent_workers_claim_each_outbox_once(
     assert statuses == [DeliveryStatus.SENT, DeliveryStatus.SENT]
 
 
+@pytest.mark.parametrize("locked_at", [None, datetime(2030, 1, 1, 6, 50, tzinfo=UTC)])
 @pytest.mark.asyncio
 async def test_stale_processing_lease_is_recovered_after_restart(
     delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    locked_at: datetime | None,
 ) -> None:
     _, session_factory = delivery_database
     await add_user(session_factory, 4100012, SubscriptionMode.ALL)
@@ -516,7 +689,7 @@ async def test_stale_processing_lease_is_recovered_after_restart(
             await session.execute(
                 update(NotificationOutbox).values(
                     status=DeliveryStatus.PROCESSING,
-                    locked_at=clock.now() - timedelta(minutes=10),
+                    locked_at=locked_at,
                 )
             )
             await session.execute(

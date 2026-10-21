@@ -21,9 +21,15 @@ services:
 
   migrate:
     build: .
-    env_file: .env
     environment: *app-environment
     command: ["alembic", "upgrade", "head"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       db:
         condition: service_healthy
@@ -34,13 +40,20 @@ services:
     env_file: .env
     environment: *app-environment
     init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    stop_grace_period: 45s
+    stop_grace_period: 360s
 
 volumes:
   postgres-data:

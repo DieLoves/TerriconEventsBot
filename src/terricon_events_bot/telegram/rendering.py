@@ -85,7 +85,8 @@ class ScreenRenderer:
 
         if old_message is not None:
             await self._try_delete(*old_message)
-        assert new_message_id is not None
+        if new_message_id is None:  # pragma: no cover - _send either returns or raises
+            raise RuntimeError("Telegram send returned no message ID")
         return new_message_id
 
     async def _try_edit(

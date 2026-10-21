@@ -108,9 +108,13 @@ feedback:
   attach_photo: "TODO: Прикрепите одно фото или пропустите"
   skip_photo: "TODO: Без фото"
   preview: "TODO: Предпросмотр перед отправкой"
+  preview_name: "TODO: Имя"
+  preview_username: "TODO: Username"
+  not_specified: "TODO: не указано"
   sent: "TODO: Обращение отправлено"
   rate_limited: "TODO: Лимит обращений"
   blocked: "TODO: Отправка обращений недоступна"
+  admin_reply: "TODO: Ответ администратора"
   ticket_closed: "TODO: Обращение закрыто"
 about:
   text: "TODO: Неофициальный статус проекта, источник данных и приватность"

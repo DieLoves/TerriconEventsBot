@@ -118,3 +118,48 @@ def test_formatter_redacts_string_representation_of_unknown_objects() -> None:
 
     assert "object-secret" not in serialized
     assert "[REDACTED_SECRET]" in serialized
+
+
+def test_debug_logging_does_not_expose_groq_request_content(capsys: object) -> None:
+    import httpx
+    from groq import Groq
+
+    from terricon_events_bot.infrastructure.logging import configure_logging
+
+    root = logging.getLogger()
+    previous_handlers, previous_level = root.handlers[:], root.level
+    sdk_logger = logging.getLogger("groq._base_client")
+    previous_sdk_level = sdk_logger.level
+    try:
+        configure_logging("DEBUG")
+        sdk_logger.setLevel(logging.DEBUG)
+        with Groq(
+            api_key="test-key",
+            max_retries=0,
+            http_client=httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda _: httpx.Response(
+                        200,
+                        json={
+                            "id": "test",
+                            "choices": [],
+                            "model": "openai/gpt-oss-120b",
+                            "object": "chat.completion",
+                            "created": 0,
+                        },
+                    )
+                )
+            ),
+        ) as client:
+            client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=[{"role": "user", "content": "private event title in request"}],
+            )
+        logging.getLogger("terricon_events_bot").debug("application debug is retained")
+        captured = capsys.readouterr()  # type: ignore[attr-defined]
+        assert "private event title" not in captured.err
+        assert "application debug is retained" in captured.err
+    finally:
+        root.handlers[:] = previous_handlers
+        root.setLevel(previous_level)
+        sdk_logger.setLevel(previous_sdk_level)

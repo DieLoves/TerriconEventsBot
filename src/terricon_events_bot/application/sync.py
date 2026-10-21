@@ -294,9 +294,11 @@ class SyncService:
         observed_by_theme: dict[SourceTheme, set[int]] = defaultdict(set)
         observed_all: set[int] = set()
         for outcome in successful:
-            assert outcome.payload is not None
-            observed_by_theme[outcome.theme].update(outcome.payload.observed_source_ids)
-            observed_all.update(outcome.payload.observed_source_ids)
+            payload = outcome.payload
+            if payload is None:  # pragma: no cover - filtered by succeeded
+                raise RuntimeError("Successful endpoint has no payload")
+            observed_by_theme[outcome.theme].update(payload.observed_source_ids)
+            observed_all.update(payload.observed_source_ids)
 
         created, updated_events, hidden = await self._merge_events(
             session,
@@ -355,7 +357,8 @@ class SyncService:
             state.last_attempt_at = now
             fingerprint = f"sync_endpoint:{outcome.locale.value}:{outcome.theme.value}"
             if outcome.succeeded:
-                assert outcome.payload is not None
+                if outcome.payload is None:  # pragma: no cover - narrowed by succeeded
+                    raise RuntimeError("Successful endpoint has no payload")
                 state.last_status = SyncEndpointStatus.SUCCEEDED
                 state.consecutive_failures = 0
                 state.last_success_at = now
@@ -400,7 +403,8 @@ class SyncService:
             outcomes,
             key=lambda value: (_THEME_PRIORITY[value.theme], _LOCALE_PRIORITY[value.locale]),
         ):
-            assert outcome.payload is not None
+            if outcome.payload is None:  # pragma: no cover - successful outcomes only
+                raise RuntimeError("Successful endpoint has no payload")
             grouped_events: set[tuple[int, Locale]] = set()
             for event in outcome.payload.events:
                 duplicate_key = (event.source_id, event.localization.locale)

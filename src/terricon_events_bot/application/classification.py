@@ -12,34 +12,34 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from terricon_events_bot.domain.ai import (
+    AIAdapterError,
+    AIUsageData,
     ClassificationInput,
     ClassificationLocalization,
     ClassificationResult,
-    OpenAIUsageData,
     TranslationInput,
     TranslationResult,
 )
 from terricon_events_bot.domain.enums import (
+    AIOperation,
     CategorySlug,
     ClassificationStatus,
     Locale,
     NotificationType,
-    OpenAIOperation,
     TranslationSource,
 )
 from terricon_events_bot.domain.event_changes import canonical_hash
+from terricon_events_bot.infrastructure.groq_adapter import (
+    CLASSIFICATION_PROMPT_VERSION,
+)
 from terricon_events_bot.infrastructure.models import (
     AdminAlert,
+    AIUsage,
     DomainChange,
     Event,
     EventCategory,
     EventClassification,
     EventLocalization,
-    OpenAIUsage,
-)
-from terricon_events_bot.infrastructure.openai_adapter import (
-    CLASSIFICATION_PROMPT_VERSION,
-    OpenAIAdapterError,
 )
 
 Clock = Callable[[], datetime]
@@ -49,7 +49,7 @@ _CLAIM_LEASE = timedelta(minutes=10)
 _MAX_RETRY_DELAY = timedelta(hours=6)
 _COST_QUANTUM = Decimal("0.000000001")
 _MILLION = Decimal("1000000")
-_BUDGET_ALERT_FINGERPRINT = "openai:monthly_budget_exhausted"
+_BUDGET_ALERT_FINGERPRINT = "groq:monthly_budget_exhausted"
 
 
 class EventAI(Protocol):
@@ -59,7 +59,7 @@ class EventAI(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class OpenAIPricing:
+class AIPricing:
     input_per_million_usd: Decimal
     output_per_million_usd: Decimal
 
@@ -70,7 +70,7 @@ class OpenAIPricing:
             or self.input_per_million_usd < 0
             or self.output_per_million_usd < 0
         ):
-            raise ValueError("OpenAI prices must be finite and nonnegative")
+            raise ValueError("AI prices must be finite and nonnegative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +96,7 @@ class _JobSnapshot:
     input: ClassificationInput | None
 
 
-def calculate_openai_cost(usage: OpenAIUsageData, pricing: OpenAIPricing) -> Decimal:
+def calculate_ai_cost(usage: AIUsageData, pricing: AIPricing) -> Decimal:
     cost = (
         Decimal(usage.input_tokens) * pricing.input_per_million_usd
         + Decimal(usage.output_tokens) * pricing.output_per_million_usd
@@ -112,12 +112,12 @@ class ClassificationWorker:
         *,
         model: str,
         monthly_budget_usd: Decimal,
-        pricing: OpenAIPricing,
+        pricing: AIPricing,
         clock: Clock = lambda: datetime.now(UTC),
         logger: logging.Logger | None = None,
     ) -> None:
         if not monthly_budget_usd.is_finite() or monthly_budget_usd < 0:
-            raise ValueError("OpenAI monthly budget must be finite and nonnegative")
+            raise ValueError("AI monthly budget must be finite and nonnegative")
         self._session_factory = session_factory
         self._ai = ai
         self._model = model
@@ -125,10 +125,12 @@ class ClassificationWorker:
         self._pricing = pricing
         self._clock = clock
         self._logger = logger or logging.getLogger(__name__)
+        self._rate_limited = False
 
     async def run_batch(self, limit: int = 20) -> ClassificationBatchResult:
         if limit <= 0:
             raise ValueError("Classification batch limit must be positive")
+        self._rate_limited = False
         counts = {
             ClassificationStatus.COMPLETED: 0,
             ClassificationStatus.RETRY_WAIT: 0,
@@ -146,6 +148,15 @@ class ClassificationWorker:
                 stale += 1
             else:
                 counts[outcome] += 1
+            if self._rate_limited:
+                break
+        translation_attempts = 0
+        while not self._rate_limited and claimed + translation_attempts < limit:
+            translation_job = await self._reserve_due_translation(self._normalized_now())
+            if translation_job is None:
+                break
+            translation_attempts += 1
+            await self._translate_missing_locale(translation_job)
         return ClassificationBatchResult(
             claimed=claimed,
             completed=counts[ClassificationStatus.COMPLETED],
@@ -202,18 +213,20 @@ class ClassificationWorker:
 
         try:
             result = await self._ai.classify_event(snapshot.input)
-        except OpenAIAdapterError as error:
+        except AIAdapterError as error:
+            self._rate_limited = error.code == "rate_limit"
             return await self._record_failure(
                 job,
                 error.code,
                 self._normalized_now(),
                 attempted=True,
                 usage=error.usage,
+                retry_after_seconds=error.retry_after_seconds,
             )
         except Exception:
             self._logger.exception(
-                "Unexpected OpenAI classification failure",
-                extra={"error_code": "unexpected_openai_error", "event_id": job.event_id},
+                "Unexpected Groq classification failure",
+                extra={"error_code": "unexpected_groq_error", "event_id": job.event_id},
             )
             return await self._record_failure(
                 job, "unexpected_error", self._normalized_now(), attempted=True
@@ -222,7 +235,7 @@ class ClassificationWorker:
         completed_at = self._normalized_now()
         persisted = await self._record_success(job, result, completed_at)
         if persisted:
-            await self._translate_missing_locale(job.event_id)
+            await self._translate_missing_locale(job)
             return ClassificationStatus.COMPLETED
         return None
 
@@ -284,9 +297,10 @@ class ClassificationWorker:
         now: datetime,
         *,
         attempted: bool,
-        usage: OpenAIUsageData | None = None,
+        usage: AIUsageData | None = None,
+        retry_after_seconds: float | None = None,
     ) -> ClassificationStatus | None:
-        cost = calculate_openai_cost(usage, self._pricing) if usage is not None else None
+        cost = calculate_ai_cost(usage, self._pricing) if usage is not None else None
         async with self._session_factory() as session:
             async with session.begin():
                 classification = await session.get(
@@ -295,9 +309,9 @@ class ClassificationWorker:
                 if usage is not None and cost is not None:
                     event_exists = await session.get(Event, job.event_id) is not None
                     session.add(
-                        OpenAIUsage(
+                        AIUsage(
                             event_id=job.event_id if event_exists else None,
-                            operation=OpenAIOperation.CLASSIFICATION,
+                            operation=AIOperation.CLASSIFICATION,
                             model=self._model,
                             input_tokens=usage.input_tokens,
                             output_tokens=usage.output_tokens,
@@ -308,7 +322,8 @@ class ClassificationWorker:
                     await self._refresh_budget_alert(session, now)
                 if not self._matches_job(classification, job):
                     return None
-                assert classification is not None
+                if classification is None:  # pragma: no cover - narrowed by _matches_job
+                    raise RuntimeError("Matched classification disappeared")
                 if classification.first_attempt_at is None:
                     classification.first_attempt_at = now
                 if attempted:
@@ -327,8 +342,11 @@ class ClassificationWorker:
                 classification.prompt_version = CLASSIFICATION_PROMPT_VERSION
                 classification.classified_at = now if fallback else None
                 classification.last_error_code = error_code
+                retry_delay = self._retry_delay(max(1, classification.attempts))
+                if retry_after_seconds is not None:
+                    retry_delay = max(retry_delay, timedelta(seconds=retry_after_seconds))
                 classification.next_attempt_at = (
-                    None if fallback else now + self._retry_delay(max(1, classification.attempts))
+                    None if fallback else min(now + retry_delay, deadline)
                 )
                 classification.result_metadata = {
                     **classification.result_metadata,
@@ -351,7 +369,7 @@ class ClassificationWorker:
         result: ClassificationResult,
         now: datetime,
     ) -> bool:
-        cost = calculate_openai_cost(result.usage, self._pricing)
+        cost = calculate_ai_cost(result.usage, self._pricing)
         async with self._session_factory() as session:
             async with session.begin():
                 classification = await session.get(
@@ -359,9 +377,9 @@ class ClassificationWorker:
                 )
                 event_exists = await session.get(Event, job.event_id) is not None
                 session.add(
-                    OpenAIUsage(
+                    AIUsage(
                         event_id=job.event_id if event_exists else None,
-                        operation=OpenAIOperation.CLASSIFICATION,
+                        operation=AIOperation.CLASSIFICATION,
                         model=result.model,
                         input_tokens=result.usage.input_tokens,
                         output_tokens=result.usage.output_tokens,
@@ -372,7 +390,8 @@ class ClassificationWorker:
                 await self._refresh_budget_alert(session, now)
                 if not self._matches_job(classification, job):
                     return False
-                assert classification is not None
+                if classification is None:  # pragma: no cover - narrowed by _matches_job
+                    raise RuntimeError("Matched classification disappeared")
                 classification.status = ClassificationStatus.COMPLETED
                 classification.model = result.model
                 classification.prompt_version = result.prompt_version
@@ -380,7 +399,9 @@ class ClassificationWorker:
                 classification.input_tokens += result.usage.input_tokens
                 classification.output_tokens += result.usage.output_tokens
                 classification.cost_usd += cost
-                classification.next_attempt_at = None
+                # Also lease the initial translation so a crash after classification
+                # does not permanently lose the missing localization.
+                classification.next_attempt_at = now + _CLAIM_LEASE
                 classification.classified_at = now
                 classification.last_error_code = None
                 classification.result_metadata = {
@@ -398,17 +419,81 @@ class ClassificationWorker:
                 )
                 return True
 
-    async def _translate_missing_locale(self, event_id: int) -> None:
-        async with self._session_factory() as session:
-            rows = (
-                await session.scalars(
-                    select(EventLocalization)
-                    .where(EventLocalization.event_id == event_id)
-                    .order_by(EventLocalization.locale)
+    async def _reserve_due_translation(self, now: datetime) -> _ReservedJob | None:
+        async with self._session_factory() as session, session.begin():
+            classification = await session.scalar(
+                select(EventClassification)
+                .where(
+                    EventClassification.status == ClassificationStatus.COMPLETED,
+                    EventClassification.next_attempt_at <= now,
                 )
-            ).all()
-            if len(rows) != 1 or rows[0].translation_source is not TranslationSource.OFFICIAL:
+                .order_by(EventClassification.next_attempt_at, EventClassification.event_id)
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+            if classification is None:
+                return None
+            classification.next_attempt_at = now + _CLAIM_LEASE
+            return _ReservedJob(classification.event_id, classification.semantic_hash)
+
+    async def _translation_failed(
+        self,
+        job: _ReservedJob,
+        code: str,
+        now: datetime,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        async with self._session_factory() as session, session.begin():
+            classification = await session.get(
+                EventClassification, job.event_id, with_for_update=True
+            )
+            if (
+                classification is None
+                or classification.status is not ClassificationStatus.COMPLETED
+                or classification.semantic_hash != job.semantic_hash
+                or classification.classified_at is None
+            ):
                 return
+            attempts = int(classification.result_metadata.get("translation_attempts", 0)) + 1
+            delay = self._retry_delay(attempts)
+            if retry_after_seconds is not None:
+                delay = max(delay, timedelta(seconds=retry_after_seconds))
+            deadline = classification.classified_at + _FALLBACK_AFTER
+            classification.next_attempt_at = min(now + delay, deadline) if now < deadline else None
+            classification.result_metadata = {
+                **classification.result_metadata,
+                "translation_attempts": attempts,
+                "translation_last_error": code,
+            }
+
+    async def _translate_missing_locale(self, job: _ReservedJob) -> None:
+        event_id = job.event_id
+        async with self._session_factory() as session:
+            async with session.begin():
+                classification = await session.get(
+                    EventClassification, event_id, with_for_update=True
+                )
+                if (
+                    classification is None
+                    or classification.status is not ClassificationStatus.COMPLETED
+                    or classification.semantic_hash != job.semantic_hash
+                ):
+                    return
+                rows = (
+                    await session.scalars(
+                        select(EventLocalization)
+                        .where(EventLocalization.event_id == event_id)
+                        .order_by(EventLocalization.locale)
+                    )
+                ).all()
+                if (
+                    len(rows) != 1
+                    or rows[0].translation_source is not TranslationSource.OFFICIAL
+                    or classification.classified_at is None
+                    or self._normalized_now() >= classification.classified_at + _FALLBACK_AFTER
+                ):
+                    classification.next_attempt_at = None
+                    return
             source = rows[0]
             target = Locale.KZ if source.locale is Locale.RU else Locale.RU
             source_hash = source.content_hash
@@ -426,25 +511,31 @@ class ClassificationWorker:
             async with self._session_factory() as session:
                 async with session.begin():
                     await self._upsert_budget_alert(session, now)
+            await self._translation_failed(job, "budget_exhausted", now)
             return
         try:
             result = await self._ai.translate_missing_locale(value)
-        except OpenAIAdapterError as error:
+        except AIAdapterError as error:
+            self._rate_limited = error.code == "rate_limit"
             if error.usage is not None:
                 await self._record_translation_usage(event_id, error.usage, self._normalized_now())
+            await self._translation_failed(
+                job, error.code, self._normalized_now(), error.retry_after_seconds
+            )
             self._logger.warning(
-                "OpenAI event translation failed",
+                "Groq event translation failed",
                 extra={"error_code": error.code, "event_id": event_id},
             )
             return
         except Exception:
-            self._logger.exception(
-                "Unexpected OpenAI translation failure",
-                extra={"error_code": "unexpected_openai_error", "event_id": event_id},
+            await self._translation_failed(job, "unexpected_error", self._normalized_now())
+            self._logger.warning(
+                "Unexpected Groq translation failure",
+                extra={"error_code": "unexpected_groq_error", "event_id": event_id},
             )
             return
 
-        cost = calculate_openai_cost(result.usage, self._pricing)
+        cost = calculate_ai_cost(result.usage, self._pricing)
         completed_at = self._normalized_now()
         async with self._session_factory() as session:
             async with session.begin():
@@ -456,9 +547,9 @@ class ClassificationWorker:
                 )
                 event_exists = await session.get(Event, event_id) is not None
                 session.add(
-                    OpenAIUsage(
+                    AIUsage(
                         event_id=event_id if event_exists else None,
-                        operation=OpenAIOperation.TRANSLATION,
+                        operation=AIOperation.TRANSLATION,
                         model=result.model,
                         input_tokens=result.usage.input_tokens,
                         output_tokens=result.usage.output_tokens,
@@ -467,6 +558,20 @@ class ClassificationWorker:
                     )
                 )
                 await self._refresh_budget_alert(session, completed_at)
+                classification = await session.get(
+                    EventClassification, event_id, with_for_update=True
+                )
+                if (
+                    classification is None
+                    or classification.status is not ClassificationStatus.COMPLETED
+                    or classification.semantic_hash != job.semantic_hash
+                ):
+                    return
+                classification.next_attempt_at = None
+                classification.result_metadata = {
+                    **classification.result_metadata,
+                    "translation_last_error": None,
+                }
                 if (
                     current_source is None
                     or current_source.translation_source is not TranslationSource.OFFICIAL
@@ -500,17 +605,17 @@ class ClassificationWorker:
     async def _record_translation_usage(
         self,
         event_id: int,
-        usage: OpenAIUsageData,
+        usage: AIUsageData,
         now: datetime,
     ) -> None:
-        cost = calculate_openai_cost(usage, self._pricing)
+        cost = calculate_ai_cost(usage, self._pricing)
         async with self._session_factory() as session:
             async with session.begin():
                 event_exists = await session.get(Event, event_id) is not None
                 session.add(
-                    OpenAIUsage(
+                    AIUsage(
                         event_id=event_id if event_exists else None,
-                        operation=OpenAIOperation.TRANSLATION,
+                        operation=AIOperation.TRANSLATION,
                         model=self._model,
                         input_tokens=usage.input_tokens,
                         output_tokens=usage.output_tokens,
@@ -600,7 +705,7 @@ class ClassificationWorker:
             "model": self._model,
         }
         statement = pg_insert(AdminAlert).values(
-            kind="openai_budget_exhausted",
+            kind="groq_budget_exhausted",
             fingerprint=_BUDGET_ALERT_FINGERPRINT,
             details=details,
             occurrence_count=1,
@@ -614,7 +719,6 @@ class ClassificationWorker:
                 set_={
                     "details": details,
                     "occurrence_count": AdminAlert.occurrence_count + 1,
-                    "last_seen_at": now,
                 },
             )
         )
@@ -638,9 +742,9 @@ class ClassificationWorker:
     @staticmethod
     async def _monthly_spend(session: AsyncSession, month_start: datetime) -> Decimal:
         spent = await session.scalar(
-            select(func.coalesce(func.sum(OpenAIUsage.cost_usd), Decimal("0"))).where(
-                OpenAIUsage.occurred_at >= month_start,
-                OpenAIUsage.occurred_at < ClassificationWorker._next_month(month_start),
+            select(func.coalesce(func.sum(AIUsage.cost_usd), Decimal("0"))).where(
+                AIUsage.occurred_at >= month_start,
+                AIUsage.occurred_at < ClassificationWorker._next_month(month_start),
             )
         )
         return Decimal(spent or 0)

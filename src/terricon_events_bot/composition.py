@@ -3,15 +3,15 @@ from pathlib import Path
 
 import httpx
 from aiogram import Bot, Router
-from openai import AsyncOpenAI
+from groq import AsyncGroq
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from terricon_events_bot.application.admin import AdminService
 from terricon_events_bot.application.broadcasts import BroadcastService, BroadcastWorker
 from terricon_events_bot.application.catalog import CatalogQuery, CatalogStateStore
 from terricon_events_bot.application.classification import (
+    AIPricing,
     ClassificationWorker,
-    OpenAIPricing,
 )
 from terricon_events_bot.application.delivery import (
     DeliveryWorker,
@@ -32,7 +32,7 @@ from terricon_events_bot.config import Settings
 from terricon_events_bot.domain.enums import AccessMode
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
-from terricon_events_bot.infrastructure.openai_adapter import OpenAIEventAdapter
+from terricon_events_bot.infrastructure.groq_adapter import GroqEventAdapter
 from terricon_events_bot.infrastructure.terricon import TerriconClient
 from terricon_events_bot.localization import LocalizationCatalog
 from terricon_events_bot.telegram.admin import AdminTelegramController, build_admin_router
@@ -59,8 +59,8 @@ class Foundation:
     terricon_client: TerriconClient
     sync_service: SyncRunner
     job_coordinator: AdvisoryJobCoordinator
-    openai_client: AsyncOpenAI
-    openai_adapter: OpenAIEventAdapter
+    groq_client: AsyncGroq
+    groq_adapter: GroqEventAdapter
     classification_worker: ClassificationWorker
     outbox_service: OutboxService
     delivery_worker: DeliveryWorker
@@ -82,7 +82,7 @@ class Foundation:
             await self.http_client.aclose()
         finally:
             try:
-                await self.openai_client.close()
+                await self.groq_client.close()
             finally:
                 try:
                     await self.bot.session.close()
@@ -108,20 +108,20 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         SyncService(session_factory, terricon_client),
         job_coordinator,
     )
-    openai_client = AsyncOpenAI(
-        api_key=settings.openai_api_key.get_secret_value(),
-        timeout=settings.openai_timeout_seconds,
+    groq_client = AsyncGroq(
+        api_key=settings.groq_api_key.get_secret_value(),
+        timeout=settings.groq_timeout_seconds,
         max_retries=0,
     )
-    openai_adapter = OpenAIEventAdapter(openai_client, settings.openai_model)
+    groq_adapter = GroqEventAdapter(groq_client, settings.groq_model)
     classification_worker = ClassificationWorker(
         session_factory,
-        openai_adapter,
-        model=settings.openai_model,
-        monthly_budget_usd=settings.openai_monthly_budget_usd,
-        pricing=OpenAIPricing(
-            input_per_million_usd=settings.openai_input_price_per_million_usd,
-            output_per_million_usd=settings.openai_output_price_per_million_usd,
+        groq_adapter,
+        model=settings.groq_model,
+        monthly_budget_usd=settings.groq_monthly_budget_usd,
+        pricing=AIPricing(
+            input_per_million_usd=settings.groq_input_price_per_million_usd,
+            output_per_million_usd=settings.groq_output_price_per_million_usd,
         ),
     )
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
@@ -166,7 +166,11 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         session_factory,
         AiogramBroadcastGateway(bot),
     )
-    feedback_gateway = AiogramFeedbackGateway(bot, settings.resolved_admin_chat_id)
+    feedback_gateway = AiogramFeedbackGateway(
+        bot,
+        settings.resolved_admin_chat_id,
+        localizations,
+    )
     feedback_controller = FeedbackTelegramController(
         feedback_service,
         feedback_gateway,
@@ -208,8 +212,8 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         terricon_client=terricon_client,
         sync_service=sync_service,
         job_coordinator=job_coordinator,
-        openai_client=openai_client,
-        openai_adapter=openai_adapter,
+        groq_client=groq_client,
+        groq_adapter=groq_adapter,
         classification_worker=classification_worker,
         outbox_service=outbox_service,
         delivery_worker=delivery_worker,

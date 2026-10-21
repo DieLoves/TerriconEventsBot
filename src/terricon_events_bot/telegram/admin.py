@@ -126,7 +126,7 @@ class AdminTelegramController:
                 self._ticket_text(ticket),
                 reply_markup=self._feedback_gateway.ticket_keyboard(
                     ticket.ticket_id,
-                    blocked=False,
+                    blocked=ticket.feedback_blocked,
                 ),
             )
 
@@ -203,7 +203,7 @@ class AdminTelegramController:
                     self._ticket_text(ticket),
                     reply_markup=self._feedback_gateway.ticket_keyboard(
                         ticket.ticket_id,
-                        blocked=False,
+                        blocked=ticket.feedback_blocked,
                     ),
                 )
         elif callback_data.action is AdminAction.BROADCAST and isinstance(
@@ -241,9 +241,11 @@ class AdminTelegramController:
                 await callback.message.answer(f"Введите ответ для обращения #{ticket.ticket_id}.")
             return
         if callback_data.action is AdminTicketAction.CLOSE:
-            await self._feedback.close(ticket.ticket_id)
+            if not await self._feedback.close(ticket.ticket_id):
+                await callback.answer("Обращение уже закрыто.", show_alert=True)
+                return
             try:
-                await self._feedback_gateway.notify_closed(ticket.telegram_id)
+                await self._feedback_gateway.notify_closed(ticket.telegram_id, ticket.locale)
             except TelegramSendError as error:
                 if error.blocked:
                     await self._users.deactivate(ticket.user_id)
@@ -343,6 +345,7 @@ class AdminTelegramController:
             try:
                 telegram_message_id = await self._feedback_gateway.send_user_reply(
                     ticket.telegram_id,
+                    ticket.locale,
                     message.text,
                 )
             except TelegramSendError as error:
@@ -397,6 +400,16 @@ class AdminTelegramController:
 
     async def _status_text(self) -> str:
         status = await self._admin.status()
+        endpoint_lines = [
+            (
+                f"- {endpoint.locale.value}/{endpoint.source_theme.value}: "
+                f"{endpoint.last_status.value if endpoint.last_status else 'нет данных'}; "
+                f"ошибок подряд {endpoint.consecutive_failures}; "
+                f"последний успех {endpoint.last_success_at or 'нет'}"
+                + (f"; код {endpoint.last_error_code}" if endpoint.last_error_code else "")
+            )
+            for endpoint in status.endpoints
+        ]
         return (
             "Состояние приложения\n"
             f"Baseline: {status.baseline_completed_at or 'нет'}\n"
@@ -404,7 +417,8 @@ class AdminTelegramController:
             f"Endpoint с ошибками: {status.endpoint_failures}\n"
             f"Классификация в очереди: {status.pending_classifications}\n"
             f"Outbox в очереди: {status.pending_outbox}\n"
-            f"Незавершённые рассылки: {status.unfinished_broadcasts}"
+            f"Незавершённые рассылки: {status.unfinished_broadcasts}\n"
+            "Endpoint:\n" + ("\n".join(endpoint_lines) if endpoint_lines else "- нет данных")
         )
 
     async def _stats_text(self) -> str:
@@ -417,7 +431,7 @@ class AdminTelegramController:
             f"События: {stats.events}\n"
             f"Открытые обращения: {stats.open_tickets}\n"
             f"Рассылки: {stats.broadcasts}\n"
-            f"OpenAI за месяц: ${stats.openai_cost_usd}"
+            f"Нейросеть за месяц: ${stats.ai_cost_usd}"
         )
 
     async def _set_block_from_command(
@@ -450,7 +464,8 @@ class AdminTelegramController:
     def _ticket_text(ticket: object) -> str:
         from terricon_events_bot.application.feedback import FeedbackTicketView
 
-        assert isinstance(ticket, FeedbackTicketView)
+        if not isinstance(ticket, FeedbackTicketView):
+            raise TypeError("ticket must be a FeedbackTicketView")
         username = f"@{ticket.username}" if ticket.username else "не указан"
         lines = [
             f"Обращение #{ticket.ticket_id}",
@@ -574,7 +589,8 @@ class AdminTelegramController:
     def _button(text: str, callback_data: object) -> InlineKeyboardButton:
         from aiogram.filters.callback_data import CallbackData
 
-        assert isinstance(callback_data, CallbackData)
+        if not isinstance(callback_data, CallbackData):
+            raise TypeError("callback_data must be a CallbackData instance")
         return InlineKeyboardButton(text=text, callback_data=callback_data.pack())
 
     @staticmethod

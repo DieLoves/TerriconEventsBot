@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from terricon_events_bot.domain.enums import (
     FeedbackAuthor,
     FeedbackKind,
+    Locale,
     TicketStatus,
 )
 from terricon_events_bot.infrastructure.models import (
@@ -64,6 +66,7 @@ class FeedbackNotification:
     ticket_id: int
     user_id: int
     telegram_id: int
+    locale: Locale
     kind: FeedbackKind
     display_name: str | None
     username: str | None
@@ -77,8 +80,10 @@ class FeedbackTicketView:
     ticket_id: int
     user_id: int
     telegram_id: int
+    locale: Locale
     kind: FeedbackKind
     status: TicketStatus
+    feedback_blocked: bool
     display_name: str | None
     username: str | None
     messages: tuple[tuple[FeedbackAuthor, str | None, str | None], ...]
@@ -265,18 +270,35 @@ class FeedbackService:
         if limit <= 0:
             raise ValueError("Ticket limit must be positive")
         async with self._session_factory() as session:
-            ticket_ids = tuple(
-                (
-                    await session.scalars(
-                        select(FeedbackTicket.id)
-                        .where(FeedbackTicket.status != TicketStatus.CLOSED)
-                        .order_by(FeedbackTicket.updated_at.desc(), FeedbackTicket.id.desc())
-                        .limit(limit)
+            rows = (
+                await session.execute(
+                    select(FeedbackTicket, User)
+                    .join(User, User.id == FeedbackTicket.user_id)
+                    .where(FeedbackTicket.status != TicketStatus.CLOSED)
+                    .order_by(FeedbackTicket.updated_at.desc(), FeedbackTicket.id.desc())
+                    .limit(limit)
+                )
+            ).all()
+            if not rows:
+                return ()
+            ticket_ids = [ticket.id for ticket, _ in rows]
+            messages = (
+                await session.scalars(
+                    select(FeedbackMessage)
+                    .where(FeedbackMessage.ticket_id.in_(ticket_ids))
+                    .order_by(
+                        FeedbackMessage.ticket_id,
+                        FeedbackMessage.created_at,
+                        FeedbackMessage.id,
                     )
-                ).all()
-            )
-            views = [await self._ticket_view(session, ticket_id) for ticket_id in ticket_ids]
-        return tuple(view for view in views if view is not None)
+                )
+            ).all()
+        grouped: dict[int, list[FeedbackMessage]] = {ticket_id: [] for ticket_id in ticket_ids}
+        for message in messages:
+            grouped[message.ticket_id].append(message)
+        return tuple(
+            self._ticket_view_from_rows(ticket, user, grouped[ticket.id]) for ticket, user in rows
+        )
 
     async def ticket(self, ticket_id: int) -> FeedbackTicketView | None:
         async with self._session_factory() as session:
@@ -351,16 +373,25 @@ class FeedbackService:
                 ticket.updated_at = now
                 await session.delete(state)
 
-    async def close(self, ticket_id: int) -> None:
+    async def close(self, ticket_id: int) -> bool:
         now = self._now()
         async with self._session_factory() as session:
             async with session.begin():
                 ticket = await session.get(FeedbackTicket, ticket_id, with_for_update=True)
                 if ticket is None:
                     raise LookupError("Feedback ticket does not exist")
+                if ticket.status is TicketStatus.CLOSED:
+                    return False
                 ticket.status = TicketStatus.CLOSED
                 ticket.closed_at = now
                 ticket.updated_at = now
+                await session.execute(
+                    delete(FsmState).where(
+                        FsmState.scope == _ADMIN_REPLY_SCOPE,
+                        FsmState.data["ticket_id"].as_integer() == ticket_id,
+                    )
+                )
+                return True
 
     async def set_blocked(
         self,
@@ -372,7 +403,7 @@ class FeedbackService:
         now = self._now()
         async with self._session_factory() as session:
             async with session.begin():
-                ticket = await session.get(FeedbackTicket, ticket_id)
+                ticket = await session.get(FeedbackTicket, ticket_id, with_for_update=True)
                 if ticket is None:
                     raise LookupError("Feedback ticket does not exist")
                 user = await self._lock_user(session, ticket.user_id)
@@ -415,12 +446,22 @@ class FeedbackService:
                 .order_by(FeedbackMessage.created_at, FeedbackMessage.id)
             )
         ).all()
+        return self._ticket_view_from_rows(ticket, user, messages)
+
+    @staticmethod
+    def _ticket_view_from_rows(
+        ticket: FeedbackTicket,
+        user: User,
+        messages: Sequence[FeedbackMessage],
+    ) -> FeedbackTicketView:
         return FeedbackTicketView(
             ticket_id=ticket.id,
             user_id=user.id,
             telegram_id=user.telegram_id,
+            locale=user.locale,
             kind=ticket.kind,
             status=ticket.status,
+            feedback_blocked=user.feedback_blocked_at is not None,
             display_name=user.display_name,
             username=user.username,
             messages=tuple(
@@ -513,6 +554,7 @@ class FeedbackService:
             ticket_id=ticket.id,
             user_id=user.id,
             telegram_id=user.telegram_id,
+            locale=user.locale,
             kind=ticket.kind,
             display_name=user.display_name,
             username=user.username,

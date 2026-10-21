@@ -12,16 +12,19 @@ from terricon_events_bot.domain.enums import (
     BroadcastStatus,
     ClassificationStatus,
     DeliveryStatus,
+    Locale,
+    SourceTheme,
+    SyncEndpointStatus,
     TicketStatus,
 )
 from terricon_events_bot.infrastructure.models import (
+    AIUsage,
     Broadcast,
     BroadcastDelivery,
     Event,
     EventClassification,
     FeedbackTicket,
     NotificationOutbox,
-    OpenAIUsage,
     SubscriptionCategory,
     SubscriptionSettings,
     SyncEndpointState,
@@ -40,10 +43,21 @@ class SystemClock:
 
 
 @dataclass(frozen=True, slots=True)
+class AdminEndpointStatus:
+    locale: Locale
+    source_theme: SourceTheme
+    last_status: SyncEndpointStatus | None
+    consecutive_failures: int
+    last_success_at: datetime | None
+    last_error_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class AdminStatus:
     baseline_completed_at: datetime | None
     last_full_success_at: datetime | None
     endpoint_failures: int
+    endpoints: tuple[AdminEndpointStatus, ...]
     pending_classifications: int
     pending_outbox: int
     unfinished_broadcasts: int
@@ -58,7 +72,7 @@ class AdminStats:
     events: int
     open_tickets: int
     broadcasts: int
-    openai_cost_usd: Decimal
+    ai_cost_usd: Decimal
 
 
 class AdminService:
@@ -79,6 +93,14 @@ class AdminService:
                 .select_from(SyncEndpointState)
                 .where(SyncEndpointState.consecutive_failures > 0)
             )
+            endpoint_rows = (
+                await session.scalars(
+                    select(SyncEndpointState).order_by(
+                        SyncEndpointState.locale,
+                        SyncEndpointState.source_theme,
+                    )
+                )
+            ).all()
             pending_classifications = await session.scalar(
                 select(func.count())
                 .select_from(EventClassification)
@@ -110,6 +132,17 @@ class AdminService:
             sync.baseline_completed_at if sync else None,
             sync.last_full_success_at if sync else None,
             endpoint_failures or 0,
+            tuple(
+                AdminEndpointStatus(
+                    endpoint.locale,
+                    endpoint.source_theme,
+                    endpoint.last_status,
+                    endpoint.consecutive_failures,
+                    endpoint.last_success_at,
+                    endpoint.last_error_code,
+                )
+                for endpoint in endpoint_rows
+            ),
             pending_classifications or 0,
             pending_outbox or 0,
             unfinished_broadcasts or 0,
@@ -139,8 +172,8 @@ class AdminService:
             )
             broadcasts = await session.scalar(select(func.count()).select_from(Broadcast))
             cost = await session.scalar(
-                select(func.coalesce(func.sum(OpenAIUsage.cost_usd), 0)).where(
-                    OpenAIUsage.occurred_at >= month_start
+                select(func.coalesce(func.sum(AIUsage.cost_usd), 0)).where(
+                    AIUsage.occurred_at >= month_start
                 )
             )
         return AdminStats(

@@ -121,6 +121,6 @@ class BroadcastAudience(StrEnum):
     BOTH = "both"
 
 
-class OpenAIOperation(StrEnum):
+class AIOperation(StrEnum):
     CLASSIFICATION = "classification"
     TRANSLATION = "translation"

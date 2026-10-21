@@ -1,5 +1,12 @@
 # Технический план реализации Terricon Events Bot v1
 
+Общий статус: исходные этапы 1–8 завершены; этап 9 (Groq) завершён локально, этап 10 начат с первого smoke.
+Переход принят пользователем 2026-10-21: SDK OpenAI полностью заменяется SDK Groq.
+Требования: `docs/specs/groq-migration.md`; задачи: `docs/plans/groq-migration.md`.
+Постреализационные compliance- и hardening-аудиты исходной v1 завершены
+2026-09-20; результаты зафиксированы в `docs/plans/terricon-events-bot-v1-compliance-audit.md`
+и `docs/plans/terricon-events-bot-v1-hardening-audit.md`.
+
 ## 1. Исходное состояние и архитектура
 
 - Проект greenfield: кода и существующей архитектуры нет, поэтому конфликтов со спецификацией не обнаружено.
@@ -118,8 +125,8 @@
 
 ### Этап 8 — scheduler, эксплуатация и деплой
 
-Статус: выполняется. Runtime, scheduler, lifecycle, heartbeat, healthcheck и Docker Compose
-подготовлены и проверены 2026-09-19; host backup/restore и production rollout ещё не выполнены.
+Статус: завершён 2026-09-19. Runtime, scheduler, lifecycle, heartbeat, healthcheck, Docker Compose,
+host backup/restore tooling и production rollout runbook подготовлены и проверены.
 
 - Зарегистрировать APScheduler jobs:
   - немедленная синхронизация при старте и далее каждые 6 часов;
@@ -135,6 +142,24 @@
 - Добавить host-скрипты `pg_dump`, ротацию семи архивов и проверку восстановления в временную БД; документировать daily cron.
 - Описать ручной rollout: backup → получение версии → сборка → миграции → restart → healthcheck → smoke-команды.
 - После закрытой beta переключать только `ACCESS_MODE`; KZ открывать публично после автоматической проверки отсутствия TODO.
+
+### Этап 9 — переход на официальный SDK Groq
+
+Статус: завершён локально 2026-10-21. 235 tests с PostgreSQL, static/lock/build/Docker
+прошли; Groq smoke 3/3 успешен. Задачи и приёмка — `docs/plans/groq-migration.md`.
+
+- Полностью удалить зависимость/импорты OpenAI SDK; использовать `AsyncGroq`,
+  GPT-OSS 120B и строгие JSON Schema для классификации и перевода.
+- Обновить настройки, usage, ошибки, очередь, runtime/admin и документацию.
+- Сохранить данные и SQL-совместимость, обработать `Retry-After`, пройти offline gate.
+
+### Этап 10 — квоты Groq Free и живая приёмка
+
+Статус: начат только первый smoke 3/3; полная оценка качества и квот ещё впереди.
+
+- Проверить реальные лимиты аккаунта, качество 20–30 событий и переводы RU/KZ.
+- Измерить токены и настроить общий throttling и квоты классификации/перевода.
+- Проверить начальный импорт, восстановление после квот и рестарта, 24-часовой fallback.
 
 ## 3. Основные программные интерфейсы
 

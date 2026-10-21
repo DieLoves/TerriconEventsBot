@@ -10,44 +10,44 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from terricon_events_bot.application.classification import (
+    AIPricing,
     ClassificationWorker,
-    OpenAIPricing,
 )
 from terricon_events_bot.domain.ai import (
+    AIAdapterError,
+    AIUsageData,
     ClassificationInput,
     ClassificationOutput,
     ClassificationResult,
-    OpenAIUsageData,
     TranslationInput,
     TranslationOutput,
     TranslationResult,
 )
 from terricon_events_bot.domain.enums import (
+    AIOperation,
     CategorySlug,
     ClassificationStatus,
     EventFormat,
     Locale,
     NotificationType,
-    OpenAIOperation,
     SourceTheme,
     TranslationSource,
 )
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
 from terricon_events_bot.infrastructure.models import (
     AdminAlert,
+    AIUsage,
     DomainChange,
     Event,
     EventCategory,
     EventClassification,
     EventLocalization,
-    OpenAIUsage,
 )
-from terricon_events_bot.infrastructure.openai_adapter import OpenAIAdapterError
 
 pytestmark = pytest.mark.postgres
 
 NOW = datetime(2030, 2, 10, 12, tzinfo=UTC)
-PRICING = OpenAIPricing(Decimal("0.20"), Decimal("1.20"))
+PRICING = AIPricing(Decimal("0.20"), Decimal("1.20"))
 
 
 class MutableClock:
@@ -60,7 +60,8 @@ class MutableClock:
 
 class FakeAI:
     def __init__(self) -> None:
-        self.classification_error: OpenAIAdapterError | None = None
+        self.classification_error: AIAdapterError | None = None
+        self.translation_error: AIAdapterError | None = None
         self.classification_calls: list[ClassificationInput] = []
         self.translation_calls: list[TranslationInput] = []
         self.categories = (CategorySlug.DEVELOPMENT_IT, CategorySlug.AI_DATA)
@@ -71,14 +72,16 @@ class FakeAI:
             raise self.classification_error
         return ClassificationResult(
             output=ClassificationOutput(categories=self.categories),
-            usage=OpenAIUsageData(input_tokens=120, output_tokens=8),
-            model="gpt-5.6-luna",
+            usage=AIUsageData(input_tokens=120, output_tokens=8),
+            model="openai/gpt-oss-120b",
             prompt_version="classification-v1",
             duration_ms=125,
         )
 
     async def translate_missing_locale(self, value: TranslationInput) -> TranslationResult:
         self.translation_calls.append(value)
+        if self.translation_error is not None:
+            raise self.translation_error
         return TranslationResult(
             output=TranslationOutput(
                 title=f"{value.title} KZ",
@@ -86,8 +89,8 @@ class FakeAI:
                 audience=value.audience,
                 speaker=value.speaker,
             ),
-            usage=OpenAIUsageData(input_tokens=80, output_tokens=20),
-            model="gpt-5.6-luna",
+            usage=AIUsageData(input_tokens=80, output_tokens=20),
+            model="openai/gpt-oss-120b",
             prompt_version="translation-v1",
             duration_ms=200,
         )
@@ -197,11 +200,136 @@ def worker(
     return ClassificationWorker(
         session_factory,
         ai,
-        model="gpt-5.6-luna",
+        model="openai/gpt-oss-120b",
         monthly_budget_usd=budget,
         pricing=PRICING,
         clock=clock,
     )
+
+
+@pytest.mark.asyncio
+async def test_groq_rate_limit_stops_batch_and_persists_server_retry_after(
+    classification_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = classification_database
+    first = await seed_job(factory, 901)
+    second = await seed_job(factory, 902)
+    ai = FakeAI()
+    error = AIAdapterError("rate_limit")
+    error.retry_after_seconds = 3600
+    ai.classification_error = error
+    clock = MutableClock(NOW)
+
+    result = await worker(factory, ai, clock).run_batch()
+
+    assert result.claimed == 1
+    assert result.retried == 1
+    async with factory() as session:
+        first_job = await session.get(EventClassification, first)
+        second_job = await session.get(EventClassification, second)
+        assert first_job is not None and second_job is not None
+        assert first_job.next_attempt_at == NOW + timedelta(hours=1)
+        assert second_job.attempts == 0
+        assert second_job.status is ClassificationStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_long_groq_retry_after_does_not_postpone_24_hour_fallback(
+    classification_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = classification_database
+    event_id = await seed_job(factory, 903)
+    ai = FakeAI()
+    error = AIAdapterError("rate_limit")
+    error.retry_after_seconds = 172800
+    ai.classification_error = error
+    clock = MutableClock(NOW)
+    service = worker(factory, ai, clock)
+
+    await service.run_batch()
+
+    async with factory() as session:
+        classification = await session.get(EventClassification, event_id)
+        assert classification is not None
+        assert classification.next_attempt_at == NOW + timedelta(hours=24)
+
+    clock.value = NOW + timedelta(hours=24)
+    result = await service.run_batch()
+    assert result.fallback == 1
+
+
+@pytest.mark.asyncio
+async def test_translation_rate_limit_survives_restart_without_reclassifying(
+    classification_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = classification_database
+    event_id = await seed_job(factory, 904, locales=(Locale.RU,))
+    ai = FakeAI()
+    ai.translation_error = AIAdapterError("rate_limit", retry_after_seconds=3600)
+    clock = MutableClock(NOW)
+
+    await worker(factory, ai, clock).run_batch()
+
+    async with factory() as session:
+        classification = await session.get(EventClassification, event_id)
+        assert classification is not None
+        assert classification.status is ClassificationStatus.COMPLETED
+        assert classification.next_attempt_at == NOW + timedelta(hours=1)
+
+    restarted = worker(factory, ai, clock)
+    clock.value = NOW + timedelta(minutes=59)
+    await restarted.run_batch()
+    assert len(ai.translation_calls) == 1
+    ai.translation_error = None
+    clock.value = NOW + timedelta(hours=1)
+    await restarted.run_batch()
+
+    assert len(ai.classification_calls) == 1
+    assert len(ai.translation_calls) == 2
+    async with factory() as session:
+        translated = await session.get(EventLocalization, (event_id, Locale.KZ))
+        classification = await session.get(EventClassification, event_id)
+        assert translated is not None
+        assert translated.translation_source is TranslationSource.MACHINE
+        assert classification is not None and classification.next_attempt_at is None
+        assert await session.scalar(select(func.count(DomainChange.id))) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("official_arrived", [False, True])
+async def test_translation_retry_stops_at_deadline_or_when_official_locale_arrives(
+    classification_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    official_arrived: bool,
+) -> None:
+    _, factory = classification_database
+    event_id = await seed_job(factory, 905, locales=(Locale.RU,))
+    ai = FakeAI()
+    ai.translation_error = AIAdapterError("rate_limit", retry_after_seconds=3600)
+    clock = MutableClock(NOW)
+    await worker(factory, ai, clock).run_batch()
+
+    if official_arrived:
+        async with factory() as session, session.begin():
+            session.add(
+                EventLocalization(
+                    event_id=event_id,
+                    locale=Locale.KZ,
+                    title="Official title",
+                    translation_source=TranslationSource.OFFICIAL,
+                    content_hash="d" * 64,
+                )
+            )
+    clock.value = NOW + timedelta(hours=1 if official_arrived else 24)
+    await worker(factory, ai, clock).run_batch()
+
+    assert len(ai.translation_calls) == 1
+    assert len(ai.classification_calls) == 1
+    async with factory() as session:
+        classification = await session.get(EventClassification, event_id)
+        assert classification is not None and classification.next_attempt_at is None
+        if official_arrived:
+            target = await session.get(EventLocalization, (event_id, Locale.KZ))
+            assert target is not None and target.title == "Official title"
 
 
 @pytest.mark.asyncio
@@ -223,7 +351,7 @@ async def test_completed_classification_updates_categories_ledger_and_releases_n
                 )
             ).all()
         )
-        usage = await session.scalar(select(OpenAIUsage))
+        usage = await session.scalar(select(AIUsage))
         change = await session.scalar(select(DomainChange))
 
     assert result.completed == 1 and result.claimed == 1
@@ -244,8 +372,8 @@ async def test_failure_shows_other_then_falls_back_after_24_hours(
     _, session_factory = classification_database
     event_id = await seed_job(session_factory, 9002)
     ai = FakeAI()
-    ai.classification_error = OpenAIAdapterError(
-        "invalid_output", OpenAIUsageData(input_tokens=50, output_tokens=5)
+    ai.classification_error = AIAdapterError(
+        "invalid_output", AIUsageData(input_tokens=50, output_tokens=5)
     )
     clock = MutableClock()
     service = worker(session_factory, ai, clock)
@@ -259,7 +387,7 @@ async def test_failure_shows_other_then_falls_back_after_24_hours(
             )
         ).all()
         change_count = await session.scalar(select(func.count()).select_from(DomainChange))
-        usage = await session.scalar(select(OpenAIUsage))
+        usage = await session.scalar(select(AIUsage))
 
     assert first.retried == 1
     assert classification is not None and classification.status is ClassificationStatus.RETRY_WAIT
@@ -292,10 +420,10 @@ async def test_budget_exhaustion_pauses_calls_and_deduplicates_alert(
     async with session_factory() as session:
         async with session.begin():
             session.add(
-                OpenAIUsage(
+                AIUsage(
                     event_id=None,
-                    operation=OpenAIOperation.CLASSIFICATION,
-                    model="gpt-5.6-luna",
+                    operation=AIOperation.CLASSIFICATION,
+                    model="openai/gpt-oss-120b",
                     input_tokens=1,
                     output_tokens=1,
                     cost_usd=Decimal("5"),
@@ -307,6 +435,8 @@ async def test_budget_exhaustion_pauses_calls_and_deduplicates_alert(
     service = worker(session_factory, ai, clock)
 
     first = await service.run_batch()
+    async with session_factory() as session:
+        first_seen = await session.scalar(select(AdminAlert.last_seen_at))
     clock.value += timedelta(minutes=6)
     second = await service.run_batch()
 
@@ -318,8 +448,9 @@ async def test_budget_exhaustion_pauses_calls_and_deduplicates_alert(
     assert not ai.classification_calls
     assert statuses == [ClassificationStatus.RETRY_WAIT, ClassificationStatus.RETRY_WAIT]
     assert len(alerts) == 1
-    assert alerts[0].kind == "openai_budget_exhausted"
+    assert alerts[0].kind == "groq_budget_exhausted"
     assert alerts[0].occurrence_count == 4
+    assert alerts[0].last_seen_at == first_seen
 
 
 @pytest.mark.asyncio
@@ -339,16 +470,14 @@ async def test_missing_locale_is_machine_translated_with_separate_usage(
 
     async with session_factory() as session:
         localization = await session.get(EventLocalization, (event_id, Locale.KZ))
-        operations = (
-            await session.scalars(select(OpenAIUsage.operation).order_by(OpenAIUsage.id))
-        ).all()
+        operations = (await session.scalars(select(AIUsage.operation).order_by(AIUsage.id))).all()
 
     assert result.completed == 1
     assert len(ai.translation_calls) == 1
     assert localization is not None
     assert localization.translation_source is TranslationSource.MACHINE
     assert localization.title.endswith("KZ")
-    assert operations == [OpenAIOperation.CLASSIFICATION, OpenAIOperation.TRANSLATION]
+    assert operations == [AIOperation.CLASSIFICATION, AIOperation.TRANSLATION]
 
 
 @pytest.mark.asyncio
@@ -411,7 +540,7 @@ async def test_call_that_crosses_budget_creates_alert_immediately(
 
     assert result.completed == 1
     assert alert is not None
-    assert alert.fingerprint == "openai:monthly_budget_exhausted"
+    assert alert.fingerprint == "groq:monthly_budget_exhausted"
 
 
 @pytest.mark.asyncio

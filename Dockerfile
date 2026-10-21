@@ -20,7 +20,8 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 WORKDIR /app
-RUN useradd --create-home --uid 10001 app
+RUN python -m pip uninstall --yes pip \
+    && useradd --create-home --uid 10001 app
 COPY --from=builder /opt/venv /opt/venv
 COPY alembic.ini ./
 COPY alembic ./alembic

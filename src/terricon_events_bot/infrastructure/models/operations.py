@@ -20,12 +20,12 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from terricon_events_bot.domain.enums import OpenAIOperation
+from terricon_events_bot.domain.enums import AIOperation
 from terricon_events_bot.infrastructure.database import Base
 from terricon_events_bot.infrastructure.models.types import enum_type
 
 
-class OpenAIUsage(Base):
+class AIUsage(Base):
     __tablename__ = "openai_usage"
     __table_args__ = (
         CheckConstraint("input_tokens >= 0", name="input_tokens_nonnegative"),
@@ -38,8 +38,8 @@ class OpenAIUsage(Base):
     event_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("events.id", ondelete="SET NULL")
     )
-    operation: Mapped[OpenAIOperation] = mapped_column(
-        enum_type(OpenAIOperation, "openai_operation"), nullable=False
+    operation: Mapped[AIOperation] = mapped_column(
+        enum_type(AIOperation, "openai_operation"), nullable=False
     )
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
