@@ -42,6 +42,8 @@ class ScreenRenderer:
         self._bot = bot
         self._session_factory = session_factory
         self._user_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
+        # Telegram file IDs of uploaded local assets, so each file is uploaded once per process.
+        self._uploaded_file_ids: dict[Path, str] = {}
 
     async def render(self, user_id: int, chat_id: int, screen: Screen) -> int:
         lock = self._user_locks.get(user_id)
@@ -107,7 +109,7 @@ class ScreenRenderer:
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
             else:
-                await self._bot.edit_message_media(
+                edited = await self._bot.edit_message_media(
                     chat_id=chat_id,
                     message_id=message_id,
                     media=InputMediaPhoto(
@@ -117,6 +119,7 @@ class ScreenRenderer:
                     ),
                     reply_markup=screen.keyboard,
                 )
+                self._remember_upload(image, edited)
         except TelegramBadRequest as error:
             if "message is not modified" in error.message.lower():
                 return True
@@ -138,9 +141,10 @@ class ScreenRenderer:
                     parse_mode=ParseMode.HTML,
                     reply_markup=screen.keyboard,
                 )
+                self._remember_upload(image, message)
                 return message.message_id
             except TelegramAPIError:
-                pass
+                self._forget_upload(image)
         message = await self._bot.send_message(
             chat_id=chat_id,
             text=screen.text,
@@ -156,6 +160,18 @@ class ScreenRenderer:
         except TelegramAPIError:
             return
 
-    @staticmethod
-    def _media_value(image: str | Path) -> str | FSInputFile:
-        return FSInputFile(image) if isinstance(image, Path) else image
+    def _media_value(self, image: str | Path) -> str | FSInputFile:
+        if isinstance(image, Path):
+            return self._uploaded_file_ids.get(image.resolve()) or FSInputFile(image)
+        return image
+
+    def _remember_upload(self, image: str | Path | None, message: object) -> None:
+        photo = getattr(message, "photo", None)
+        if isinstance(image, Path) and isinstance(photo, list) and photo:
+            file_id = getattr(photo[-1], "file_id", None)
+            if isinstance(file_id, str):
+                self._uploaded_file_ids[image.resolve()] = file_id
+
+    def _forget_upload(self, image: str | Path | None) -> None:
+        if isinstance(image, Path):
+            self._uploaded_file_ids.pop(image.resolve(), None)

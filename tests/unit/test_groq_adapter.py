@@ -383,3 +383,35 @@ async def test_translation_cannot_change_speaker_or_invent_null_fields(client_fa
     assert result.output.speaker == speaker
     assert result.output.description is None
     assert result.output.audience is None
+
+
+async def test_long_event_reservation_is_capped_by_quota_capacity(client_factory):
+    from uuid import uuid4
+
+    reserved = []
+
+    class Quota:
+        async def reserve(self, tokens):
+            reserved.append(tokens)
+            return uuid4()
+
+        async def settle(self, identifier, usage, headers, **kwargs):
+            return None
+
+    def respond(request):
+        return httpx.Response(200, json=completion('{"categories":["business_finance"]}'))
+
+    adapter = GroqEventAdapter(
+        client_factory(respond), MODEL, quota=Quota(), max_reserved_tokens=6400
+    )
+    long_input = ClassificationInput(
+        localizations=tuple(
+            ClassificationLocalization(locale=locale, title="Course", description="Описание " * 400)
+            for locale in Locale
+        )
+    )
+
+    result = await adapter.classify_event(long_input)
+
+    assert result.output.categories == (CategorySlug.BUSINESS_FINANCE,)
+    assert reserved == [6400]

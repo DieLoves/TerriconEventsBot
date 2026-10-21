@@ -470,7 +470,7 @@ def build_user_router(
     catalog_state: CatalogStateStore,
     renderer: ScreenRenderer,
     views: TelegramViews,
-    middleware: UserContextMiddleware,
+    middleware: UserContextMiddleware | None = None,
     feedback: FeedbackTelegramController | None = None,
 ) -> Router:
     controller = TelegramController(
@@ -485,8 +485,9 @@ def build_user_router(
     router = Router(name="user-ui")
     router.message.filter(F.chat.type == ChatType.PRIVATE)
     router.callback_query.filter(F.message.chat.type == ChatType.PRIVATE)
-    router.message.outer_middleware(middleware)
-    router.callback_query.outer_middleware(middleware)
+    if middleware is not None:
+        router.message.outer_middleware(middleware)
+        router.callback_query.outer_middleware(middleware)
 
     router.message.register(controller.start, CommandStart())
     router.callback_query.register(controller.choose_locale, ChooseLocaleCallback.filter())

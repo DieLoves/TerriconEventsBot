@@ -148,13 +148,14 @@ async def seed_job(
     *,
     notify_new: bool = True,
     locales: tuple[Locale, ...] = (Locale.RU, Locale.KZ),
+    starts_at: datetime = NOW + timedelta(days=1),
 ) -> int:
     async with session_factory() as session:
         async with session.begin():
             event = Event(
                 source_id=source_id,
                 source_theme=SourceTheme.IT,
-                starts_at=NOW + timedelta(days=1),
+                starts_at=starts_at,
                 event_format=EventFormat.OFFLINE,
                 event_languages=["ru"],
                 semantic_hash=f"{source_id:064d}"[-64:],
@@ -677,3 +678,56 @@ async def test_first_quota_denial_does_not_reset_queued_deadline(classification_
     async with factory() as session:
         row = await session.get(EventClassification, event_id)
         assert row.next_attempt_at == NOW + timedelta(minutes=1)
+
+
+@pytest.mark.asyncio
+async def test_upcoming_events_are_classified_before_archive_backlog(
+    classification_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = classification_database
+    for offset in range(3):
+        await seed_job(factory, 951 + offset, starts_at=NOW - timedelta(days=30 + offset))
+    await seed_job(factory, 960, starts_at=NOW + timedelta(days=2))
+    await seed_job(factory, 961, starts_at=NOW - timedelta(hours=2))
+    ai = FakeAI()
+
+    result = await worker(factory, ai, MutableClock(NOW)).run_batch(limit=2)
+
+    classified = {call.localizations[0].title.split()[1] for call in ai.classification_calls}
+    assert result.completed == 2
+    assert classified == {"960", "961"}
+
+
+@pytest.mark.asyncio
+async def test_failed_reclassification_keeps_previous_categories_until_fallback(
+    classification_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = classification_database
+    event_id = await seed_job(factory, 970, notify_new=False)
+    async with factory() as session:
+        async with session.begin():
+            session.add(EventCategory(event_id=event_id, category=CategorySlug.MARKETING_SALES))
+    ai = FakeAI()
+    ai.classification_error = AIAdapterError("timeout")
+    clock = MutableClock(NOW)
+
+    await worker(factory, ai, clock).run_batch()
+    async with factory() as session:
+        retrying = set(
+            await session.scalars(
+                select(EventCategory.category).where(EventCategory.event_id == event_id)
+            )
+        )
+    clock.value = NOW + timedelta(hours=25)
+    await worker(factory, ai, clock).run_batch()
+
+    async with factory() as session:
+        final = set(
+            await session.scalars(
+                select(EventCategory.category).where(EventCategory.event_id == event_id)
+            )
+        )
+        classification = await session.get(EventClassification, event_id)
+    assert retrying == final == {CategorySlug.MARKETING_SALES}
+    assert classification is not None
+    assert classification.status is ClassificationStatus.FALLBACK

@@ -86,8 +86,12 @@ class GroqEventAdapter:
         *,
         timer: Callable[[], float] = monotonic,
         quota: AIQuota | None = None,
+        max_reserved_tokens: int | None = None,
     ) -> None:
+        if max_reserved_tokens is not None and max_reserved_tokens <= 0:
+            raise ValueError("max_reserved_tokens must be positive")
         self._quota = quota
+        self._max_reserved_tokens = max_reserved_tokens
         self._client = client
         self._model = model
         self._timer = timer
@@ -165,6 +169,11 @@ class GroqEventAdapter:
             + 512
             + max_output_tokens
         )
+        if self._max_reserved_tokens is not None:
+            # Byte counts overestimate Cyrillic text several times; an estimate above
+            # the whole quota would otherwise make a long event unclassifiable forever.
+            # Actual usage replaces the reservation after the response.
+            estimated_tokens = min(estimated_tokens, self._max_reserved_tokens)
         reservation = await self._quota.reserve(estimated_tokens) if self._quota else None
         try:
             raw = await self._client.chat.completions.with_raw_response.create(

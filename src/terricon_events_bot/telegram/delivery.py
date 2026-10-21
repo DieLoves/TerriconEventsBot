@@ -10,6 +10,7 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
     TelegramServerError,
 )
+from aiogram.types import LinkPreviewOptions
 
 from terricon_events_bot.application.delivery import TelegramSendError
 
@@ -22,7 +23,11 @@ class AiogramTelegramGateway:
 
     async def send_message(self, telegram_id: int, text: str) -> int:
         try:
-            message = await self._bot.send_message(chat_id=telegram_id, text=text)
+            message = await self._bot.send_message(
+                chat_id=telegram_id,
+                text=text,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
         except TelegramAPIError as error:
             raise normalize_telegram_error(error) from error
         return message.message_id

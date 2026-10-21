@@ -42,8 +42,11 @@ def test_repository_contains_main_and_all_category_assets() -> None:
     resolver = AssetResolver(PROJECT_ROOT / "assets")
 
     main = resolver.main(Locale.RU)
-    assert main is not None and main.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert main is not None and main.read_bytes().startswith(b"\xff\xd8\xff")
+    # Screens are re-sent often; keep decorative assets small enough for quick uploads.
+    assert main.stat().st_size < 512 * 1024
     for category in CategorySlug:
         image = resolver.category(Locale.KZ, category)
         assert image is not None
-        assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        assert image.read_bytes().startswith(b"\xff\xd8\xff")
+        assert image.stat().st_size < 512 * 1024

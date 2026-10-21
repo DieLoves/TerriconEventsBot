@@ -122,3 +122,47 @@ async def test_revoked_known_user_is_marked_without_profile_duplication(
     assert revoked is None
     assert count == 1
     assert user is not None and not user.access_granted
+
+
+@pytest.mark.asyncio
+async def test_startup_access_reconciliation_follows_current_configuration(
+    user_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = user_database
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(BetaAllowlistEntry(telegram_id=200))
+            session.add_all(
+                User(telegram_id=telegram_id, access_granted=True)
+                for telegram_id in (100, 200, 300, 400)
+            )
+
+    revoked = await service(
+        session_factory, allowed=frozenset({100}), admins=frozenset({300})
+    ).reconcile_access()
+
+    async with session_factory() as session:
+        granted = dict(
+            (await session.execute(select(User.telegram_id, User.access_granted))).tuples().all()
+        )
+    assert revoked == 1
+    assert granted == {100: True, 200: True, 300: True, 400: False}
+
+    restored = await service(session_factory, mode=AccessMode.PUBLIC).reconcile_access()
+
+    async with session_factory() as session:
+        denied = await session.scalar(
+            select(func.count()).select_from(User).where(User.access_granted.is_(False))
+        )
+    assert restored == 1
+    assert denied == 0
+
+    await service(session_factory, allowed=frozenset({100, 400})).reconcile_access()
+    readded = await service(session_factory, allowed=frozenset({400})).reconcile_access()
+
+    async with session_factory() as session:
+        granted = dict(
+            (await session.execute(select(User.telegram_id, User.access_granted))).tuples().all()
+        )
+    assert readded == 1
+    assert granted == {100: False, 200: True, 300: False, 400: True}

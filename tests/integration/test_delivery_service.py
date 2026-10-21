@@ -327,6 +327,60 @@ async def test_materialization_waits_for_categories_from_pending_classification(
 
 
 @pytest.mark.asyncio
+async def test_materialization_skips_changes_for_events_that_already_ended(
+    delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = delivery_database
+    user_id = await add_user(session_factory, 4100201, SubscriptionMode.ALL)
+    # 2030-01-10 12:00 Almaty; "today" starts at 2030-01-09 19:00 UTC.
+    clock = FrozenClock(datetime(2030, 1, 10, 7, tzinfo=UTC))
+    ended = await add_event(
+        session_factory, 5100201, "Yesterday event", datetime(2030, 1, 9, 12, tzinfo=UTC)
+    )
+    today = await add_event(
+        session_factory, 5100202, "Morning event", datetime(2030, 1, 10, 3, tzinfo=UTC)
+    )
+    skipped_changes = [
+        await add_change(
+            session_factory,
+            ended,
+            revision,
+            notification_type,
+            new_categories=(CategorySlug.AI_DATA,),
+            change_data={"registration_url": {"old": "https://a.example/", "new": None}},
+        )
+        for revision, notification_type in enumerate(
+            (
+                NotificationType.NEW_EVENT,
+                NotificationType.IMPORTANT_CHANGE,
+                NotificationType.CANCELLATION,
+            ),
+            start=1,
+        )
+    ]
+    await add_change(
+        session_factory,
+        today,
+        2,
+        NotificationType.IMPORTANT_CHANGE,
+        new_categories=(CategorySlug.AI_DATA,),
+        change_data={"address": {"old": "A", "new": "B"}},
+    )
+
+    result = await outbox_service(session_factory, clock).materialize()
+
+    async with session_factory() as session:
+        deliveries = (await session.scalars(select(NotificationDelivery))).all()
+        skipped = (
+            await session.scalars(select(DomainChange).where(DomainChange.id.in_(skipped_changes)))
+        ).all()
+
+    assert result.changes == 4
+    assert [(item.user_id, item.event_id) for item in deliveries] == [(user_id, today)]
+    assert all(change.materialized_at == clock.now() for change in skipped)
+
+
+@pytest.mark.asyncio
 async def test_change_without_recipients_is_not_replayed_to_future_subscriber(
     delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
@@ -701,3 +755,38 @@ async def test_stale_processing_lease_is_recovered_after_restart(
     ).run_batch()
 
     assert result.sent == 1
+
+
+@pytest.mark.asyncio
+async def test_digest_payload_contains_safe_registration_link(
+    delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = delivery_database
+    await add_user(session_factory, 4100301, SubscriptionMode.ALL)
+    linked = await add_event(session_factory, 5100301, "Linked", datetime(2030, 1, 5, tzinfo=UTC))
+    unsafe = await add_event(session_factory, 5100302, "Unsafe", datetime(2030, 1, 6, tzinfo=UTC))
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                update(Event)
+                .where(Event.id == linked)
+                .values(registration_url="https://share.kz/gBZ5")
+            )
+            await session.execute(
+                update(Event)
+                .where(Event.id == unsafe)
+                .values(registration_url="javascript:alert(1)")
+            )
+    for event_id in (linked, unsafe):
+        await add_change(session_factory, event_id, 1, NotificationType.NEW_EVENT)
+
+    await outbox_service(
+        session_factory, FrozenClock(datetime(2030, 1, 1, 7, tzinfo=UTC))
+    ).materialize()
+
+    async with session_factory() as session:
+        outbox = await session.scalar(select(NotificationOutbox))
+    assert outbox is not None
+    text_value = outbox.payload["chunks"][0]["text"]
+    assert "https://share.kz/gBZ5" in text_value
+    assert "javascript" not in text_value

@@ -260,6 +260,7 @@ async def run_bot(settings: Settings, project_root: Path) -> None:
     dispatcher.include_router(foundation.telegram_router)
     try:
         await operations.preflight()
+        await foundation.user_service.reconcile_access()
         await operations.heartbeat(details={"state": "starting"})
         jobs = RuntimeJobs(foundation, operations, alerts, runtime_alerts)
         scheduler = build_scheduler(settings, jobs)

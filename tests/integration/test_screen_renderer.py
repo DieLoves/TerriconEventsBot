@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -8,7 +9,7 @@ import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import EditMessageText, SendPhoto
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import FSInputFile, InlineKeyboardMarkup
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -36,16 +37,21 @@ class FakeBot:
         if self.edit_error is not None:
             raise self.edit_error
 
-    async def edit_message_media(self, **kwargs: Any) -> None:
+    async def edit_message_media(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(("edit_media", kwargs))
         if self.edit_error is not None:
             raise self.edit_error
+        return SimpleNamespace(message_id=self.next_message_id, photo=self._photo_sizes())
 
     async def send_photo(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(("send_photo", kwargs))
         if self.photo_error is not None:
             raise self.photo_error
-        return SimpleNamespace(message_id=self.next_message_id)
+        return SimpleNamespace(message_id=self.next_message_id, photo=self._photo_sizes())
+
+    @staticmethod
+    def _photo_sizes() -> list[SimpleNamespace]:
+        return [SimpleNamespace(file_id="thumb-id"), SimpleNamespace(file_id="uploaded-id")]
 
     async def send_message(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(("send_message", kwargs))
@@ -75,7 +81,7 @@ def bad_request(message: str, *, photo: bool = False) -> TelegramBadRequest:
     return TelegramBadRequest(method, message)
 
 
-def screen(*, image: str | None = None) -> Screen:
+def screen(*, image: str | Path | None = None) -> Screen:
     return Screen(text="Screen", keyboard=InlineKeyboardMarkup(inline_keyboard=[]), image=image)
 
 
@@ -144,3 +150,25 @@ async def test_invalid_remote_photo_falls_back_to_text_and_tracks_screen(
     assert stored is not None
     assert (stored.current_menu_chat_id, stored.current_menu_message_id) == (10, 20)
     assert [name for name, _ in bot.calls] == ["send_photo", "send_message"]
+
+
+@pytest.mark.asyncio
+async def test_local_menu_image_is_uploaded_once_and_reused_by_file_id(
+    renderer_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    tmp_path: Path,
+) -> None:
+    _, session_factory = renderer_database
+    user_id = await add_user(session_factory, current_message=None)
+    image = tmp_path / "category.jpg"
+    image.write_bytes(b"jpeg")
+    alias = tmp_path / "ai_data.jpg"
+    alias.symlink_to(image.name)
+    bot = FakeBot()
+    renderer = ScreenRenderer(cast(Bot, bot), session_factory)
+
+    await renderer.render(user_id, 10, screen(image=image))
+    await renderer.render(user_id, 10, screen(image=alias))
+
+    assert [name for name, _ in bot.calls] == ["send_photo", "edit_media"]
+    assert isinstance(bot.calls[0][1]["photo"], FSInputFile)
+    assert bot.calls[1][1]["media"].media == "uploaded-id"

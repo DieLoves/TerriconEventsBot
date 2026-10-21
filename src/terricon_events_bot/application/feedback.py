@@ -341,6 +341,19 @@ class FeedbackService:
                 else None
             )
 
+    async def cancel_admin_reply(self, admin_user_id: int) -> bool:
+        async with self._session_factory() as session:
+            async with session.begin():
+                deleted = await session.scalar(
+                    delete(FsmState)
+                    .where(
+                        FsmState.user_id == admin_user_id,
+                        FsmState.scope == _ADMIN_REPLY_SCOPE,
+                    )
+                    .returning(FsmState.user_id)
+                )
+                return deleted is not None
+
     async def complete_admin_reply(
         self,
         admin_user_id: int,

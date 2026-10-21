@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 
 from terricon_events_bot.domain.enums import (
     AccessMode,
@@ -92,6 +93,31 @@ class UserService:
                 if user is None:
                     raise RuntimeError("User upsert did not return a persisted user")
                 return UserContext(user=user, is_admin=is_admin)
+
+    async def reconcile_access(self) -> int:
+        """Apply the configured access mode to stored users; return changed rows.
+
+        Without this, a user removed from ALLOWED_TELEGRAM_IDS would keep receiving
+        notifications and broadcasts until their next interaction with the bot.
+        """
+        if self._access_mode is AccessMode.PUBLIC:
+            permitted: ColumnElement[bool] = true()
+        else:
+            permitted = or_(
+                User.telegram_id.in_(self._allowed_telegram_ids | self._admin_telegram_ids),
+                select(BetaAllowlistEntry.telegram_id)
+                .where(BetaAllowlistEntry.telegram_id == User.telegram_id)
+                .exists(),
+            )
+        async with self._session_factory() as session:
+            async with session.begin():
+                changed = await session.scalars(
+                    update(User)
+                    .where(User.access_granted.is_distinct_from(permitted))
+                    .values(access_granted=permitted)
+                    .returning(User.id)
+                )
+                return len(changed.all())
 
     async def set_locale(self, user_id: int, locale: Locale) -> None:
         await self._update_user(user_id, locale=locale)

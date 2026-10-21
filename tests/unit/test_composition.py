@@ -11,7 +11,11 @@ from terricon_events_bot.localization import LocalizationError
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_public_foundation_rejects_unfinished_kz_locale() -> None:
+def test_public_foundation_rejects_unfinished_kz_locale(tmp_path: Path) -> None:
+    locales = tmp_path / "locales"
+    locales.mkdir()
+    (locales / "ru.yaml").write_text('key: "Мероприятия"\n', encoding="utf-8")
+    (locales / "kz.yaml").write_text('key: "TODO: Мероприятия"\n', encoding="utf-8")
     settings = Settings(
         _env_file=None,
         BASE_URL="https://api.example.test/events",
@@ -24,7 +28,7 @@ def test_public_foundation_rejects_unfinished_kz_locale() -> None:
     )
 
     with pytest.raises(LocalizationError, match="Public KZ mode"):
-        build_foundation(settings, PROJECT_ROOT)
+        build_foundation(settings, tmp_path)
 
 
 @pytest.mark.asyncio

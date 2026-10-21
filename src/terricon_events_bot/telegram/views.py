@@ -599,6 +599,9 @@ class TelegramViews:
     def feedback_text_prompt(self, user: User) -> Screen:
         return self._feedback_step(user, "feedback.enter_text")
 
+    def feedback_text_invalid(self, user: User) -> Screen:
+        return self._feedback_step(user, "feedback.text_invalid")
+
     def feedback_photo_prompt(self, user: User) -> Screen:
         locale = user.locale
         return Screen(
@@ -730,6 +733,11 @@ class TelegramViews:
         if section is CatalogSection.UPCOMING:
             url = safe_http_url(event.registration_url)
             key = "events.registration"
+            if url is None:
+                # The source closes registration early for streamed events and
+                # publishes only the broadcast link.
+                url = safe_http_url(event.recording_url)
+                key = "events.details"
         else:
             recording = safe_http_url(event.recording_url)
             url = recording or safe_http_url(event.details_url)

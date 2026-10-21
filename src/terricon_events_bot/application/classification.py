@@ -47,6 +47,7 @@ Clock = Callable[[], datetime]
 _FALLBACK_AFTER = timedelta(hours=24)
 _CLAIM_LEASE = timedelta(minutes=10)
 _MAX_RETRY_DELAY = timedelta(hours=6)
+_UPCOMING_PRIORITY_MARGIN = timedelta(days=1)
 _COST_QUANTUM = Decimal("0.000000001")
 _MILLION = Decimal("1000000")
 _BUDGET_ALERT_FINGERPRINT = "groq:monthly_budget_exhausted"
@@ -198,6 +199,18 @@ class ClassificationWorker:
                                 ),
                                 else_=1,
                             ),
+                            # Upcoming events drive notifications; the archive backlog of
+                            # an initial import must not delay them behind quota limits.
+                            case(
+                                (
+                                    select(Event.starts_at)
+                                    .where(Event.id == EventClassification.event_id)
+                                    .scalar_subquery()
+                                    >= now - _UPCOMING_PRIORITY_MARGIN,
+                                    0,
+                                ),
+                                else_=1,
+                            ),
                             EventClassification.next_attempt_at.asc().nullsfirst(),
                             EventClassification.event_id,
                         )
@@ -343,7 +356,13 @@ class ClassificationWorker:
                     classification.input_tokens += usage.input_tokens
                     classification.output_tokens += usage.output_tokens
                     classification.cost_usd += cost
-                await self._replace_categories(session, job.event_id, (CategorySlug.OTHER,))
+                # A new event is shown in "other" at once; an event that is being
+                # reclassified keeps its previous categories instead of disappearing
+                # from them while the AI provider is unavailable.
+                categories = await self._current_categories(session, job.event_id)
+                if not categories:
+                    categories = (CategorySlug.OTHER,)
+                    await self._replace_categories(session, job.event_id, categories)
                 deadline = classification.first_attempt_at.astimezone(UTC) + _FALLBACK_AFTER
                 fallback = now >= deadline
                 classification.status = (
@@ -366,12 +385,8 @@ class ClassificationWorker:
                 if error_code == "budget_exhausted":
                     await self._upsert_budget_alert(session, now)
                 if fallback:
-                    await self._update_change_categories(
-                        session, classification, (CategorySlug.OTHER,)
-                    )
-                    await self._release_new_event(
-                        session, classification, (CategorySlug.OTHER,), now
-                    )
+                    await self._update_change_categories(session, classification, categories)
+                    await self._release_new_event(session, classification, categories, now)
                 return classification.status
 
     async def _record_success(
@@ -635,6 +650,18 @@ class ClassificationWorker:
                     )
                 )
                 await self._refresh_budget_alert(session, now)
+
+    @staticmethod
+    async def _current_categories(session: AsyncSession, event_id: int) -> tuple[CategorySlug, ...]:
+        return tuple(
+            (
+                await session.scalars(
+                    select(EventCategory.category)
+                    .where(EventCategory.event_id == event_id)
+                    .order_by(EventCategory.category)
+                )
+            ).all()
+        )
 
     @staticmethod
     async def _replace_categories(

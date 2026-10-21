@@ -171,6 +171,16 @@ class AdminTelegramController:
             ),
         )
 
+    async def cancel(self, message: Message, current_user: User, is_admin: bool) -> None:
+        if not is_admin:
+            raise SkipHandler
+        cancelled = await self._feedback.cancel_admin_reply(current_user.id)
+        draft = await self._broadcasts.active_draft(current_user.telegram_id)
+        if draft is not None:
+            await self._broadcasts.cancel(draft.broadcast_id)
+            cancelled = True
+        await message.answer("Действие отменено." if cancelled else "Нечего отменять.")
+
     async def action(
         self,
         callback: CallbackQuery,
@@ -238,7 +248,9 @@ class AdminTelegramController:
             await self._feedback.begin_admin_reply(current_user.id, ticket.ticket_id)
             await callback.answer()
             if callback.message is not None:
-                await callback.message.answer(f"Введите ответ для обращения #{ticket.ticket_id}.")
+                await callback.message.answer(
+                    f"Введите ответ для обращения #{ticket.ticket_id}. /cancel — отменить."
+                )
             return
         if callback_data.action is AdminTicketAction.CLOSE:
             if not await self._feedback.close(ticket.ticket_id):
@@ -331,7 +343,8 @@ class AdminTelegramController:
         current_user: User,
         is_admin: bool,
     ) -> None:
-        if not is_admin:
+        if not is_admin or (message.text is not None and message.text.startswith("/")):
+            # Commands keep their meaning even while a reply or broadcast is pending.
             raise SkipHandler
         ticket_id = await self._feedback.pending_admin_reply(current_user.id)
         if ticket_id is not None:
@@ -496,7 +509,11 @@ class AdminTelegramController:
     def _body_prompt(self, draft: BroadcastDraft) -> str:
         missing = self._missing_locales(draft)
         locale = missing[0] if missing else None
-        return f"Введите текст рассылки для {locale.value.upper()}." if locale else "Текст готов."
+        return (
+            f"Введите текст рассылки для {locale.value.upper()}. /cancel — отменить."
+            if locale
+            else "Текст готов."
+        )
 
     @staticmethod
     def _broadcast_preview(draft: BroadcastDraft) -> str:
@@ -617,11 +634,12 @@ class AdminTelegramController:
 
 def build_admin_router(
     controller: AdminTelegramController,
-    middleware: UserContextMiddleware,
+    middleware: UserContextMiddleware | None = None,
 ) -> Router:
     router = Router(name="admin-ui")
-    router.message.outer_middleware(middleware)
-    router.callback_query.outer_middleware(middleware)
+    if middleware is not None:
+        router.message.outer_middleware(middleware)
+        router.callback_query.outer_middleware(middleware)
 
     router.message.register(controller.menu, Command("admin"))
     router.message.register(controller.status, Command("status"))
@@ -632,6 +650,7 @@ def build_admin_router(
     router.message.register(controller.block, Command("block"))
     router.message.register(controller.unblock, Command("unblock"))
     router.message.register(controller.broadcast, Command("broadcast"))
+    router.message.register(controller.cancel, Command("cancel"))
     router.callback_query.register(controller.action, AdminActionCallback.filter())
     router.callback_query.register(controller.ticket_action, AdminTicketCallback.filter())
     router.callback_query.register(

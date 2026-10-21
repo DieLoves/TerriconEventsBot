@@ -122,6 +122,7 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
             settings.groq_quota_scope,
             QuotaLimits(settings.groq_rpm, settings.groq_rpd, settings.groq_tpm, settings.groq_tpd),
         ),
+        max_reserved_tokens=min(settings.groq_tpm, settings.groq_tpd),
     )
     classification_worker = ClassificationWorker(
         session_factory,
@@ -194,8 +195,7 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
         catalog_state,
         screen_renderer,
         telegram_views,
-        middleware,
-        feedback_controller,
+        feedback=feedback_controller,
     )
     admin_router = build_admin_router(
         AdminTelegramController(
@@ -206,9 +206,12 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
             feedback_gateway,
             user_service,
         ),
-        middleware,
     )
+    # Registered once on the parent: sibling routers would otherwise each resolve
+    # (and upsert) the user for every update that falls through the admin router.
     telegram_router = Router(name="application")
+    telegram_router.message.outer_middleware(middleware)
+    telegram_router.callback_query.outer_middleware(middleware)
     telegram_router.include_router(admin_router)
     telegram_router.include_router(user_router)
     return Foundation(

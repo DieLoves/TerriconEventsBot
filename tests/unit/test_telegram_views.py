@@ -129,7 +129,7 @@ def test_subscription_view_exposes_all_categories_and_selection(tmp_path: Path) 
     assert "Все новые мероприятия" in buttons  # noqa: RUF001
 
 
-def test_kz_fallback_and_image_preferences_are_applied(tmp_path: Path) -> None:
+def test_kz_locale_and_image_preferences_are_applied(tmp_path: Path) -> None:
     main_image = tmp_path / "common" / "main.png"
     category_image = tmp_path / "common" / "categories" / "development_it.jpg"
     main_image.parent.mkdir(parents=True)
@@ -163,7 +163,7 @@ def test_kz_fallback_and_image_preferences_are_applied(tmp_path: Path) -> None:
         stale=False,
     )
 
-    assert telegram_views.main_menu(kz_user).text == "<b>Главное меню</b>"
+    assert telegram_views.main_menu(kz_user).text == "<b>Басты мәзір</b>"
     assert telegram_views.main_menu(kz_user).image == main_image
     assert telegram_views.main_menu(no_images).image is None
     assert telegram_views.catalog_list(kz_user, state, page).image == category_image
@@ -218,3 +218,25 @@ def test_feedback_preview_fits_telegram_after_html_escaping(tmp_path: Path) -> N
     assert "Подтвердить" in {
         button.text for row in preview.keyboard.inline_keyboard for button in row
     }
+
+
+def test_upcoming_card_without_registration_links_to_announced_stream(tmp_path: Path) -> None:
+    stream = "https://www.youtube.com/@TerriconValley/streams"
+    state = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING))
+
+    screen = views(tmp_path).event_card(
+        user(),
+        state,
+        event(registration_url=None, recording_url=stream),
+        page=1,
+        previous=None,
+        following=None,
+    )
+
+    links = [
+        (button.text, button.url)
+        for row in screen.keyboard.inline_keyboard
+        for button in row
+        if button.url is not None
+    ]
+    assert links == [("Подробнее", stream)]

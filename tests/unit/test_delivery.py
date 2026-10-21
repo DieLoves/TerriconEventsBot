@@ -84,3 +84,35 @@ def test_digest_renderer_splits_messages_and_keeps_delivery_mapping() -> None:
     assert chunks[0].text.startswith("Новые мероприятия")
     assert chunks[-1].text.startswith("Важные изменения")
     assert "Событие отменено" in chunks[-1].text
+
+
+def test_digest_entries_link_to_registration_but_not_cancellations() -> None:
+    renderer = DigestRenderer(
+        LocalizationCatalog.load(PROJECT_ROOT / "locales"),
+        timezone=ALMATY,
+    )
+    entries = (
+        DigestEntry(
+            event_id=1,
+            delivery_ids=(10,),
+            notification_type=NotificationType.NEW_EVENT,
+            title="Meetup",
+            starts_at=utc(2030, 1, 1, 3),
+            changed_fields=(),
+            url="https://share.kz/abc",
+        ),
+        DigestEntry(
+            event_id=2,
+            delivery_ids=(11,),
+            notification_type=NotificationType.CANCELLATION,
+            title="Cancelled",
+            starts_at=utc(2030, 1, 2, 3),
+            changed_fields=("state",),
+            url="https://share.kz/old",
+        ),
+    )
+
+    text = "\n".join(chunk.text for chunk in renderer.render(entries, Locale.RU))
+
+    assert "• Meetup\n01.01.2030 08:00\nhttps://share.kz/abc" in text
+    assert "https://share.kz/old" not in text

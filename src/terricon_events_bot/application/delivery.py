@@ -35,6 +35,7 @@ from terricon_events_bot.infrastructure.models import (
     SubscriptionSettings,
     User,
 )
+from terricon_events_bot.infrastructure.terricon.normalization import normalize_http_url
 from terricon_events_bot.localization import LocalizationCatalog
 
 _TELEGRAM_TEXT_LIMIT = 4096
@@ -108,6 +109,7 @@ class DigestEntry:
     title: str
     starts_at: datetime
     changed_fields: tuple[str, ...]
+    url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,7 +191,10 @@ class DigestRenderer:
         lines = [f"• {title}", date]
         if entry.notification_type is NotificationType.CANCELLATION:
             lines.append(self._text(locale, "notifications.cancelled"))
-        elif entry.changed_fields:
+            return "\n".join(lines)
+        if entry.url is not None:
+            lines.append(entry.url)
+        if entry.changed_fields:
             labels = [
                 self._text(locale, f"notifications.fields.{field}")
                 for field in entry.changed_fields
@@ -258,9 +263,18 @@ class OutboxService:
                 )
                 if not changes:
                     return MaterializeResult(0, 0, 0)
+                ended_event_ids = await self._ended_event_ids(
+                    session, {change.event_id for change in changes}, now
+                )
                 inserted = 0
                 for change in changes:
-                    recipient_ids = await self._recipient_ids(session, change)
+                    # Source updates after the event day (recording links, archive
+                    # cleanup) are not actionable for subscribers.
+                    recipient_ids = (
+                        ()
+                        if change.event_id in ended_event_ids
+                        else await self._recipient_ids(session, change)
+                    )
                     if recipient_ids:
                         for offset in range(0, len(recipient_ids), _INSERT_BATCH_SIZE):
                             batch = recipient_ids[offset : offset + _INSERT_BATCH_SIZE]
@@ -304,6 +318,23 @@ class OutboxService:
                     if await self._bundle_user(session, user_id, now):
                         outboxes += 1
                 return MaterializeResult(len(changes), inserted, outboxes)
+
+    async def _ended_event_ids(
+        self, session: AsyncSession, event_ids: set[int], now: datetime
+    ) -> set[int]:
+        # Same rule as the catalog: an event is current until the end of its local day.
+        timezone = self._quiet_hours.timezone
+        today_start = datetime.combine(now.astimezone(timezone).date(), time.min, timezone)
+        return set(
+            (
+                await session.scalars(
+                    select(Event.id).where(
+                        Event.id.in_(event_ids),
+                        Event.starts_at < today_start.astimezone(UTC),
+                    )
+                )
+            ).all()
+        )
 
     async def _recipient_ids(self, session: AsyncSession, change: DomainChange) -> tuple[int, ...]:
         category_values = set(change.old_categories) | set(change.new_categories)
@@ -425,6 +456,8 @@ class OutboxService:
                     NotificationDelivery.notification_type,
                     DomainChange.change_data,
                     Event.starts_at,
+                    Event.registration_url,
+                    Event.recording_url,
                 )
                 .join(DomainChange, DomainChange.id == NotificationDelivery.domain_change_id)
                 .join(Event, Event.id == NotificationDelivery.event_id)
@@ -469,6 +502,10 @@ class OutboxService:
                     title=title or f"Event {event_id}",
                     starts_at=selected.starts_at,
                     changed_fields=tuple(sorted(selected.change_data)),
+                    url=(
+                        normalize_http_url(selected.registration_url or "")
+                        or normalize_http_url(selected.recording_url or "")
+                    ),
                 )
             )
         return tuple(

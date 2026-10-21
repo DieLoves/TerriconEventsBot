@@ -6,10 +6,21 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiogram import Bot
 
-from terricon_events_bot.application.feedback import FeedbackNotification
+from terricon_events_bot.application.feedback import (
+    FeedbackDraft,
+    FeedbackError,
+    FeedbackNotification,
+    FeedbackService,
+)
 from terricon_events_bot.domain.enums import FeedbackKind, Locale
+from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.localization import LocalizationCatalog
-from terricon_events_bot.telegram.feedback import AiogramFeedbackGateway
+from terricon_events_bot.telegram.feedback import (
+    AiogramFeedbackGateway,
+    FeedbackTelegramController,
+)
+from terricon_events_bot.telegram.rendering import ScreenRenderer
+from terricon_events_bot.telegram.views import TelegramViews
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,6 +59,70 @@ async def test_feedback_gateway_copies_content_without_forwarding_or_html() -> N
     await gateway.notify_closed(100, Locale.KZ)
 
     assert bot.send_message.await_args_list[-2].kwargs["text"] == (
-        "Ответ администратора:\n\nReply body"
+        "Әкімшінің жауабы:\n\nReply body"
     )
-    assert bot.send_message.await_args_list[-1].kwargs["text"] == "Обращение закрыто."
+    assert bot.send_message.await_args_list[-1].kwargs["text"] == "Өтініш жабылды."
+
+
+def feedback_controller(
+    draft: FeedbackDraft | None,
+) -> tuple[FeedbackTelegramController, Mock, Mock]:
+    from zoneinfo import ZoneInfo
+
+    from terricon_events_bot.infrastructure.assets import AssetResolver
+
+    service = Mock(spec=FeedbackService)
+    service.draft = AsyncMock(return_value=draft)
+    service.cancel = AsyncMock()
+    service.set_text = AsyncMock(side_effect=FeedbackError("Feedback text is too long"))
+    service.add_user_reply = AsyncMock()
+    renderer = Mock(spec=ScreenRenderer)
+    renderer.render = AsyncMock(return_value=1)
+    views = TelegramViews(
+        LocalizationCatalog.load(PROJECT_ROOT / "locales"),
+        AssetResolver(PROJECT_ROOT / "missing-assets"),
+        timezone=ZoneInfo("Asia/Almaty"),
+    )
+    controller = FeedbackTelegramController(
+        cast(FeedbackService, service),
+        cast(Any, Mock(spec=AiogramFeedbackGateway)),
+        cast(Any, Mock()),
+        cast(ScreenRenderer, renderer),
+        views,
+    )
+    return controller, service, renderer
+
+
+def text_message(text: str) -> Any:
+    return SimpleNamespace(text=text, photo=None, caption=None, chat=SimpleNamespace(id=100))
+
+
+@pytest.mark.asyncio
+async def test_command_during_feedback_draft_cancels_it_instead_of_becoming_text() -> None:
+    controller, service, renderer = feedback_controller(
+        FeedbackDraft(FeedbackKind.IDEA, None, None, "text")
+    )
+    user = User(id=1, telegram_id=100, locale=Locale.RU)
+
+    handled = await controller.handle_message(text_message("/help"), user)
+
+    assert handled is False
+    service.cancel.assert_awaited_once_with(1)
+    service.set_text.assert_not_awaited()
+    service.add_user_reply.assert_not_awaited()
+    renderer.render.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_invalid_feedback_text_is_reported_to_the_user() -> None:
+    controller, service, renderer = feedback_controller(
+        FeedbackDraft(FeedbackKind.IDEA, None, None, "text")
+    )
+    user = User(id=1, telegram_id=100, locale=Locale.RU)
+
+    handled = await controller.handle_message(text_message("x" * 4050), user)
+
+    assert handled is True
+    service.set_text.assert_awaited_once()
+    screen = renderer.render.await_args.args[2]
+    assert "4000" in screen.text

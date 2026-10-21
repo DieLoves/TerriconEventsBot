@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from terricon_events_bot.application.delivery import TelegramSendError
 from terricon_events_bot.application.feedback import (
     FeedbackBlockedError,
+    FeedbackError,
     FeedbackNotification,
     FeedbackRateLimitedError,
     FeedbackService,
@@ -240,6 +241,11 @@ class FeedbackTelegramController:
 
     async def handle_message(self, message: Message, current_user: User) -> bool:
         draft = await self._service.draft(current_user.id)
+        if message.text is not None and message.text.startswith("/"):
+            # An unknown command leaves the wizard instead of becoming feedback content.
+            if draft is not None:
+                await self._service.cancel(current_user.id)
+            return False
         if draft is not None:
             if draft.state == "text":
                 if message.text is None:
@@ -249,7 +255,17 @@ class FeedbackTelegramController:
                         self._views.feedback_text_prompt(current_user),
                     )
                     return True
-                await self._service.set_text(current_user.id, message.text)
+                try:
+                    await self._service.set_text(current_user.id, message.text)
+                except FeedbackStateError:
+                    raise
+                except FeedbackError:
+                    await self._renderer.render(
+                        current_user.id,
+                        message.chat.id,
+                        self._views.feedback_text_invalid(current_user),
+                    )
+                    return True
                 await self._renderer.render(
                     current_user.id,
                     message.chat.id,
@@ -288,7 +304,7 @@ class FeedbackTelegramController:
                 body=body,
                 telegram_file_id=file_id,
             )
-        except (FeedbackStateError, FeedbackBlockedError):
+        except FeedbackError:
             return False
         try:
             chat_id, message_id = await self._gateway.publish(notification)

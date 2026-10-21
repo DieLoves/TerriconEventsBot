@@ -8,17 +8,23 @@ from terricon_events_bot.localization import LocalizationCatalog, LocalizationEr
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_project_locales_have_identical_keys_and_ru_fallback() -> None:
+def test_project_kz_locale_is_complete_for_public_launch() -> None:
     catalog = LocalizationCatalog.load(PROJECT_ROOT / "locales")
 
+    catalog.ensure_public_kz_ready()
+
+    assert catalog.unresolved_todos() == ()
     assert catalog.get(Locale.RU, "menu.events") == "Мероприятия"
-    assert catalog.get(Locale.KZ, "menu.events") == "Мероприятия"
-    assert "menu.events" in catalog.unresolved_todos()
+    assert catalog.get(Locale.KZ, "menu.events") == "Іс-шаралар"  # noqa: RUF001
 
 
-def test_public_kz_is_rejected_while_todos_remain() -> None:
-    catalog = LocalizationCatalog.load(PROJECT_ROOT / "locales")
+def test_kz_todo_falls_back_to_ru_and_blocks_public_mode(tmp_path: Path) -> None:
+    (tmp_path / "ru.yaml").write_text('key: "Мероприятия"\n', encoding="utf-8")
+    (tmp_path / "kz.yaml").write_text('key: "TODO: Мероприятия"\n', encoding="utf-8")
+    catalog = LocalizationCatalog.load(tmp_path)
 
+    assert catalog.get(Locale.KZ, "key") == "Мероприятия"
+    assert catalog.unresolved_todos() == ("key",)
     with pytest.raises(LocalizationError, match="Public KZ mode is unavailable"):
         catalog.ensure_public_kz_ready()
 
