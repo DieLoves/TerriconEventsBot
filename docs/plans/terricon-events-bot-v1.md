@@ -1,6 +1,7 @@
 # Технический план реализации Terricon Events Bot v1
 
-Общий статус: исходные этапы 1–8 завершены; этап 9 (Groq) завершён локально, этап 10 начат с первого smoke.
+Общий статус: этапы 1–9 завершены и опубликованы в `origin/main` (`e175f15`);
+этап 10 начат с первого smoke.
 Переход принят пользователем 2026-10-21: SDK OpenAI полностью заменяется SDK Groq.
 Требования: `docs/specs/groq-migration.md`; задачи: `docs/plans/groq-migration.md`.
 Постреализационные compliance- и hardening-аудиты исходной v1 завершены
@@ -145,7 +146,8 @@ host backup/restore tooling и production rollout runbook подготовлен
 
 ### Этап 9 — переход на официальный SDK Groq
 
-Статус: завершён локально 2026-10-21. 235 tests с PostgreSQL, static/lock/build/Docker
+Статус: завершён и опубликован 2026-10-21 (`e175f15`).
+235 tests с PostgreSQL, static/lock/build/Docker
 прошли; Groq smoke 3/3 успешен. Задачи и приёмка — `docs/plans/groq-migration.md`.
 
 - Полностью удалить зависимость/импорты OpenAI SDK; использовать `AsyncGroq`,

@@ -2,7 +2,7 @@
 
 ## Groq — текущее дополнение 2026-10-21
 
-Этап 9 завершён локально: `openai` SDK полностью удалён; используется `groq==0.37.1`,
+Этап 9 завершён и опубликован: `openai` SDK полностью удалён; используется `groq==0.37.1`,
 `AsyncGroq`/Chat Completions и `openai/gpt-oss-120b`, strict JSON Schema + Pydantic.
 Все AI-настройки теперь `GROQ_*`; цены Free по умолчанию 0/0, usage сохраняется.
 Физические SQL-имена `openai_usage`/`openai_operation` сохранены для совместимости;
@@ -27,7 +27,7 @@ RU → KZ translation, HTTP 200, 1230 токенов, 334–607 мс. Ключ �
 полная проверка квот и общий throttling. Первые 3 synthetic smoke этого не заменяют.
 Истина: `docs/specs/groq-migration.md`, `docs/plans/groq-migration.md`,
 `docs/operations/groq-smoke-2026-10-21.md`. По запросу пользователя от 2026-10-21
-Groq и все прежние audit/operations-изменения подготовлены к commit/push.
+Groq и все прежние audit/operations-изменения опубликованы в `origin/main`.
 Статус публикации указан ниже; production rollout не выполнялся.
 
 ## Objective (исходные этапы 1–8)
@@ -41,11 +41,17 @@ Docker/runtime и operations-документацией. Найденные comp
 
 - Исходная база: `1f0b955 feat: add administration and production runtime`.
 - Пользователь разрешил commit/push в существующий `origin/main`:
-  `git@github.com:DieLoves/TerriconEventsBot.git`. Перед публикацией выполнен fetch,
-  расхождений между HEAD и origin/main нет.
+  `git@github.com:DieLoves/TerriconEventsBot.git`. Перед публикацией выполнен fetch;
+  изменений на remote поверх исходной базы не было.
 - В публикацию входят operations-дополнения этапа 8, compliance/hardening, migration
   `0010_hardening_queue_state`, assets, документация и Groq этап 9.
-- Публикация подготовлена; результат push и SHA фиксируются после подтверждения remote.
+- Код опубликован коммитом `e175f1512455d47d3ee2ada89534cd7ba0b865a8`
+  (`feat: migrate event AI to Groq and complete v1 hardening`), 85 файлов.
+  Push выполнен без force; SHA `refs/heads/main` независимо подтверждён через
+  `git ls-remote`. После code push рабочее дерево было чистым.
+- Этот handoff и статусы планов уточнены отдельным последующим коммитом документации;
+  его SHA определяется текущим HEAD. Старые аудиты и smoke-отчёт сохраняют исторические
+  результаты исходной приёмки.
 - `.env` игнорируется Git; его содержимое не выводилось и не менялось.
 
 ## Завершённые operations/audit-изменения после исходной базы
@@ -96,6 +102,18 @@ Docker/runtime и operations-документацией. Найденные comp
   0 записей и 0 невалидных записей с первой попытки.
 - Временный backup и одноразовый PostgreSQL-контейнер после smoke удалены.
 
+## Проверка перед публикацией 2026-10-21
+
+- Полный suite повторён на отдельной PostgreSQL 17: **235 passed**, без пропусков.
+- Ruff check/format (116 Python-файлов), mypy strict (53 source files), lock,
+  `bash -n scripts/backup.sh scripts/restore-smoke.sh` и diff check — PASS.
+- Ранее в этой сессии собран и проверен Docker-образ с Groq SDK без OpenAI SDK;
+  после этого production-код не менялся. Security scans и backup/restore из
+  исторической секции перед этим push повторно не запускались.
+- В публикации отсутствуют `.env`, venv, backups и сборочные артефакты.
+  Автоматический поиск известных форматов API-ключей/private keys по кандидатам
+  коммита не нашёл совпадений; память вне проекта не публиковалась.
+
 ## Expected launch gates
 
 - `locales/kz.yaml` намеренно содержит TODO-шаблоны и использует RU fallback в закрытой beta.
@@ -110,11 +128,11 @@ Docker/runtime и operations-документацией. Найденные comp
 - На проверке 2026-10-21 контейнер `terricon-events-bot-db-1` healthy; приложение
   Terricon не запущено. Старого `terricon-hardening-test-db` больше нет.
 - Проверочный образ `terricon-events-bot:groq-test` собран; production-контейнеры
-  не пересоздавались. PostgreSQL для публикационной регрессии одноразовая и изолированная.
+  не пересоздавались. Одноразовая PostgreSQL публикационного gate удалена после тестов.
 - Остальные проекты и их контейнеры не менялись.
 
 ## Next step
 
 Продолжить этап 10 по `docs/plans/groq-migration.md`: качество реальных событий,
-обратный KZ → RU перевод и общие квоты. Commit/push разрешены пользователем
+обратный KZ → RU перевод и общие квоты. Commit/push выполнены по запросу пользователя
 2026-10-21; production rollout требует отдельного поручения.
