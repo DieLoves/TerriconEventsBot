@@ -309,3 +309,25 @@ def test_card_and_description_navigation_never_reuse_one_label(tmp_path: Path) -
     for screen in (card, description):
         labels = [text for row in button_rows(screen) for text in row]
         assert len(labels) == len(set(labels))
+
+
+def test_upcoming_registration_opens_the_site_form_for_the_event(tmp_path: Path) -> None:
+    site = "https://terricon.kz/ru/it#aleksanova28.10"
+    state = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING))
+
+    screen = views(tmp_path).event_card(
+        user(),
+        state,
+        event(registration_url="https://share.kz/gBZ5", details_url=site),
+        page=1,
+        previous=None,
+        following=None,
+    )
+
+    links = [
+        (button.text, button.url)
+        for row in screen.keyboard.inline_keyboard
+        for button in row
+        if button.url is not None
+    ]
+    assert links == [("📝 Регистрация", site)]

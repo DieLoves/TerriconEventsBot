@@ -35,7 +35,10 @@ from terricon_events_bot.infrastructure.models import (
     SubscriptionSettings,
     User,
 )
-from terricon_events_bot.infrastructure.terricon.normalization import normalize_http_url
+from terricon_events_bot.infrastructure.terricon.normalization import (
+    normalize_http_url,
+    registration_link,
+)
 from terricon_events_bot.localization import LocalizationCatalog
 
 _TELEGRAM_TEXT_LIMIT = 4096
@@ -486,8 +489,10 @@ class OutboxService:
             else []
         )
         titles: dict[int, dict[Locale, str]] = defaultdict(dict)
+        details_urls: dict[int, dict[Locale, str | None]] = defaultdict(dict)
         for localization in localizations:
             titles[localization.event_id][localization.locale] = localization.title
+            details_urls[localization.event_id][localization.locale] = localization.details_url
         grouped: dict[int, list[Any]] = defaultdict(list)
         for row in rows:
             grouped[row.event_id].append(row)
@@ -504,6 +509,8 @@ class OutboxService:
             )
             localized = titles[event_id]
             title = localized.get(locale) or localized.get(Locale.RU) or localized.get(Locale.KZ)
+            details = details_urls[event_id]
+            details_url = details.get(locale) or details.get(Locale.RU) or details.get(Locale.KZ)
             entries.append(
                 DigestEntry(
                     event_id=event_id,
@@ -513,7 +520,7 @@ class OutboxService:
                     starts_at=selected.starts_at,
                     changed_fields=tuple(sorted(selected.change_data)),
                     url=(
-                        normalize_http_url(selected.registration_url or "")
+                        registration_link(selected.registration_url, details_url)
                         or normalize_http_url(selected.recording_url or "")
                     ),
                 )

@@ -6,7 +6,7 @@ import json
 import re
 import unicodedata
 from datetime import UTC, datetime
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from terricon_events_bot.domain.enums import EventFormat, Locale, SourceTheme
 from terricon_events_bot.domain.events import (
@@ -33,6 +33,8 @@ _ACTIVE_STATUSES = {"new_mitap"}
 _ARCHIVE_STATUSES = {"end_mitap"}
 _DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _MAX_URL_LENGTH = 2048
+# RFC 3986 fragment characters; anything else is dropped rather than passed on.
+_URL_FRAGMENT = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:@/?%-]*")
 
 
 class NormalizationError(ValueError):
@@ -54,7 +56,7 @@ def _clean_multiline_optional(value: str) -> str | None:
     return "\n".join(lines) or None
 
 
-def normalize_http_url(value: str) -> str | None:
+def normalize_http_url(value: str, *, keep_fragment: bool = False) -> str | None:
     candidate = value.strip()
     if (
         not candidate
@@ -99,7 +101,38 @@ def normalize_http_url(value: str) -> str | None:
     netloc = hostname
     if port is not None:
         netloc += f":{port}"
-    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path or "/", parsed.query, ""))
+    fragment = (
+        parsed.fragment
+        if keep_fragment and _URL_FRAGMENT.fullmatch(parsed.fragment) is not None
+        else ""
+    )
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path or "/", parsed.query, fragment))
+
+
+def site_event_url(page_url: str | None, uid: str) -> str | None:
+    """Link to one event on the source site: ``<theme page>#<uid>``.
+
+    The site matches ``decodeURIComponent(location.hash)`` against the event ``uid`` and
+    opens that event's registration form, so the uid is percent-encoded as is.
+    """
+    if page_url is None or not uid.strip():
+        return page_url
+    return urlunsplit(urlsplit(page_url)._replace(fragment=quote(uid.strip(), safe="")))
+
+
+def registration_link(registration_url: str | None, details_url: str | None) -> str | None:
+    """Prefer the site registration form over the external short link.
+
+    The form is only offered while the source reports open registration; without an
+    event anchor the bare theme page is less useful than the external link.
+    """
+    external = normalize_http_url(registration_url or "")
+    if external is None:
+        return None
+    site = normalize_http_url(details_url or "", keep_fragment=True)
+    if site is not None and urlsplit(site).fragment:
+        return site
+    return external
 
 
 def _content_hash(localization: dict[str, str | None]) -> str:
@@ -172,7 +205,7 @@ def normalize_event(
     if raw_theme != expected_theme.value:
         issues.append(NormalizationIssue("theme_mismatch", "type", raw_theme))
 
-    details_url = _normalize_url(dto.url, "url", issues)
+    details_url = site_event_url(_normalize_url(dto.url, "url", issues), dto.uid)
     complete_url = _normalize_url(dto.card_info.complete_url, "complete_url", issues)
     live_url = _normalize_url(dto.card_info.url_live, "url_live", issues)
     if complete_url and live_url and complete_url != live_url:

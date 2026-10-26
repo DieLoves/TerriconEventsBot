@@ -790,3 +790,38 @@ async def test_digest_payload_contains_safe_registration_link(
     text_value = outbox.payload["chunks"][0]["text"]
     assert "https://share.kz/gBZ5" in text_value
     assert "javascript" not in text_value
+
+
+@pytest.mark.asyncio
+async def test_digest_registration_link_opens_the_site_form_when_anchored(
+    delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = delivery_database
+    await add_user(session_factory, 4100311, SubscriptionMode.ALL)
+    event_id = await add_event(
+        session_factory, 5100311, "Anchored", datetime(2030, 1, 5, tzinfo=UTC)
+    )
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                update(Event)
+                .where(Event.id == event_id)
+                .values(registration_url="https://share.kz/gBZ5")
+            )
+            await session.execute(
+                update(EventLocalization)
+                .where(EventLocalization.event_id == event_id)
+                .values(details_url="https://terricon.kz/ru/it#aleksanova28.10")
+            )
+    await add_change(session_factory, event_id, 1, NotificationType.NEW_EVENT)
+
+    await outbox_service(
+        session_factory, FrozenClock(datetime(2030, 1, 1, 7, tzinfo=UTC))
+    ).materialize()
+
+    async with session_factory() as session:
+        outbox = await session.scalar(select(NotificationOutbox))
+    assert outbox is not None
+    text_value = outbox.payload["chunks"][0]["text"]
+    assert "🔗 https://terricon.kz/ru/it#aleksanova28.10" in text_value
+    assert "share.kz" not in text_value

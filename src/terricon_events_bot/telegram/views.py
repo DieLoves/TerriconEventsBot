@@ -29,7 +29,10 @@ from terricon_events_bot.domain.enums import (
 )
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.models import User
-from terricon_events_bot.infrastructure.terricon.normalization import normalize_http_url
+from terricon_events_bot.infrastructure.terricon.normalization import (
+    normalize_http_url,
+    registration_link,
+)
 from terricon_events_bot.localization import LocalizationCatalog
 from terricon_events_bot.telegram.callbacks import (
     CatalogAllCallback,
@@ -826,7 +829,7 @@ class TelegramViews:
         self, locale: Locale, section: CatalogSection, event: EventDetails
     ) -> InlineKeyboardButton | None:
         if section is CatalogSection.UPCOMING:
-            url = safe_http_url(event.registration_url)
+            url = registration_link(event.registration_url, event.details_url)
             key, icon = "events.registration", "📝"
             if url is None:
                 # The source closes registration early for streamed events and
@@ -835,7 +838,7 @@ class TelegramViews:
                 key, icon = "events.details", "🔗"
         else:
             recording = safe_http_url(event.recording_url)
-            url = recording or safe_http_url(event.details_url)
+            url = recording or safe_http_url(event.details_url, keep_fragment=True)
             key, icon = ("events.recording", "🎬") if recording else ("events.details", "🔗")
         if url is None:
             return None
@@ -893,8 +896,8 @@ class TelegramViews:
         return html.escape(value, quote=False)
 
 
-def safe_http_url(value: str | None) -> str | None:
-    return normalize_http_url(value) if value is not None else None
+def safe_http_url(value: str | None, *, keep_fragment: bool = False) -> str | None:
+    return normalize_http_url(value, keep_fragment=keep_fragment) if value is not None else None
 
 
 def split_html_chunks(value: str, limit: int = _DESCRIPTION_CHUNK_LIMIT) -> tuple[str, ...]:

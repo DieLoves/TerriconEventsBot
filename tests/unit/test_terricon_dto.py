@@ -14,6 +14,7 @@ from terricon_events_bot.infrastructure.terricon.normalization import (
     NormalizationError,
     normalize_event,
     normalize_http_url,
+    registration_link,
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "terricon"
@@ -54,7 +55,46 @@ def test_normalization_maps_format_languages_urls_and_archive_link() -> None:
     assert event.event_languages == ("ru",)
     assert event.registration_url is None
     assert event.recording_url == "https://recordings.example/business"
-    assert event.localization.details_url == "https://events.example/ru/business/fixture-business"
+    assert (
+        event.localization.details_url
+        == "https://events.example/ru/business/fixture-business#fixture-business"
+    )
+
+
+def test_details_url_anchors_the_site_registration_form_by_uid() -> None:
+    raw = deepcopy(load_fixture(Locale.RU, SourceTheme.IT))
+    raw["url"] = "https://terricon.kz/ru/it"
+    raw["uid"] = "aleksanova28.10"
+    plain, _ = normalize_event(TerriconEventDTO.model_validate(raw), Locale.RU, SourceTheme.IT)
+    raw["uid"] = "turdiev | maksim\u2028 afanasev04.03"
+    unusual, _ = normalize_event(TerriconEventDTO.model_validate(raw), Locale.RU, SourceTheme.IT)
+    raw["uid"] = " "
+    missing, _ = normalize_event(TerriconEventDTO.model_validate(raw), Locale.RU, SourceTheme.IT)
+
+    assert plain.localization.details_url == "https://terricon.kz/ru/it#aleksanova28.10"
+    # The site compares decodeURIComponent(location.hash) with the uid.
+    assert unusual.localization.details_url == (
+        "https://terricon.kz/ru/it#turdiev%20%7C%20maksim%E2%80%A8%20afanasev04.03"
+    )
+    assert missing.localization.details_url == "https://terricon.kz/ru/it"
+
+
+def test_registration_prefers_site_form_only_while_registration_is_open() -> None:
+    site = "https://terricon.kz/ru/it#aleksanova28.10"
+
+    assert registration_link("https://share.kz/gBZ5", site) == site
+    assert registration_link("https://share.kz/gBZ5", "https://terricon.kz/ru/it") == (
+        "https://share.kz/gBZ5"
+    )
+    assert registration_link(None, site) is None
+    assert registration_link("https://share.kz/gBZ5", "javascript:alert(1)#x") == (
+        "https://share.kz/gBZ5"
+    )
+    assert normalize_http_url(site) == "https://terricon.kz/ru/it"
+    assert normalize_http_url(site, keep_fragment=True) == site
+    assert normalize_http_url("https://a.example/#<script>", keep_fragment=True) == (
+        "https://a.example/"
+    )
 
 
 def test_unknown_values_are_preserved_safely_and_reported() -> None:
