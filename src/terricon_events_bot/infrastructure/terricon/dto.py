@@ -53,7 +53,7 @@ class TerriconEventDTO(TerriconDTO):
     id: int = Field(gt=0, strict=True)
     uid: str
     type: str
-    type_text: TerriconLocalizedTextDTO
+    type_text: TerriconLocalizedTextDTO | None = None
     card_type: str
     url: str
     event_type: str = Field(alias="eventType")

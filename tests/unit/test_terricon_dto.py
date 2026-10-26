@@ -55,10 +55,7 @@ def test_normalization_maps_format_languages_urls_and_archive_link() -> None:
     assert event.event_languages == ("ru",)
     assert event.registration_url is None
     assert event.recording_url == "https://recordings.example/business"
-    assert (
-        event.localization.details_url
-        == "https://events.example/ru/business/fixture-business#fixture-business"
-    )
+    assert event.localization.details_url == "https://events.example/ru/business/fixture-business"
 
 
 def test_details_url_anchors_the_site_registration_form_by_uid() -> None:

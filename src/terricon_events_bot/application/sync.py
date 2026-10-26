@@ -5,9 +5,10 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -20,6 +21,7 @@ from terricon_events_bot.domain.enums import (
     SourceTheme,
     SyncEndpointStatus,
     SyncRunStatus,
+    SyncSource,
     SyncTrigger,
     TranslationSource,
 )
@@ -48,10 +50,13 @@ from terricon_events_bot.infrastructure.terricon.client import (
 )
 
 Clock = Callable[[], datetime]
-EndpointKey = tuple[Locale, SourceTheme]
+EndpointKey = tuple[SyncSource, Locale, SourceTheme | None]
 
 _LOCALE_PRIORITY = {Locale.RU: 0, Locale.KZ: 1}
 _THEME_PRIORITY = {theme: index for index, theme in enumerate(SourceTheme)}
+_DEFAULT_TIMEZONE = ZoneInfo("Asia/Almaty")
+_DEFAULT_FALLBACK_ALERT_AFTER = timedelta(hours=24)
+_FALLBACK_ALERT = "sync_source_fallback"
 _COMMON_FIELDS = (
     "starts_at",
     "event_format",
@@ -64,6 +69,8 @@ _COMMON_FIELDS = (
 
 
 class TerriconSource(Protocol):
+    async def fetch_stage(self, locale: Locale) -> EndpointPayload: ...
+
     async def fetch_detailed(self, locale: Locale, theme: SourceTheme) -> EndpointPayload: ...
 
 
@@ -81,8 +88,9 @@ class SyncResult:
 
 @dataclass(frozen=True, slots=True)
 class _EndpointOutcome:
+    source: SyncSource
     locale: Locale
-    theme: SourceTheme
+    theme: SourceTheme | None
     payload: EndpointPayload | None
     error_code: str | None
     attempts: int
@@ -90,6 +98,21 @@ class _EndpointOutcome:
     @property
     def succeeded(self) -> bool:
         return self.payload is not None
+
+    @property
+    def key(self) -> str:
+        if self.theme is None:
+            return f"{self.source.value}:{self.locale.value}"
+        return f"{self.locale.value}:{self.theme.value}"
+
+
+@dataclass(frozen=True, slots=True)
+class _Cycle:
+    """Requests of one cycle: ``data`` feeds the catalog, ``attempted`` the audit."""
+
+    source: SyncSource
+    data: tuple[_EndpointOutcome, ...]
+    attempted: tuple[_EndpointOutcome, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,22 +135,26 @@ class SyncService:
         *,
         clock: Clock = lambda: datetime.now(UTC),
         logger: logging.Logger | None = None,
+        timezone: ZoneInfo = _DEFAULT_TIMEZONE,
+        fallback_alert_after: timedelta = _DEFAULT_FALLBACK_ALERT_AFTER,
     ) -> None:
+        if fallback_alert_after <= timedelta():
+            raise ValueError("fallback_alert_after must be positive")
         self._session_factory = session_factory
         self._source = source
         self._clock = clock
         self._logger = logger or logging.getLogger(__name__)
+        self._timezone = timezone
+        self._fallback_alert_after = fallback_alert_after
 
     async def run(self, trigger: SyncTrigger) -> SyncResult:
-        outcomes = await asyncio.gather(
-            *(self._fetch_endpoint(locale, theme) for locale in Locale for theme in SourceTheme)
-        )
+        cycle = await self._fetch_cycle()
         now = self._normalized_now()
-        sync_run_id = await self._create_run_audit(trigger, outcomes, now)
+        sync_run_id = await self._create_run_audit(trigger, cycle, now)
         try:
             async with self._session_factory() as session:
                 async with session.begin():
-                    result = await self._persist_cycle(session, sync_run_id, outcomes, now)
+                    result = await self._persist_cycle(session, sync_run_id, cycle, now)
             return result
         except Exception as error:
             self._logger.exception(
@@ -143,14 +170,28 @@ class SyncService:
                 )
             raise
 
+    async def _fetch_cycle(self) -> _Cycle:
+        """eventsByStage is primary; getAllEvents replaces it for the whole cycle."""
+        stage = tuple(
+            await asyncio.gather(*(self._fetch_stage_endpoint(locale) for locale in Locale))
+        )
+        if all(outcome.succeeded for outcome in stage):
+            return _Cycle(SyncSource.STAGE, stage, stage)
+        legacy = tuple(
+            await asyncio.gather(
+                *(self._fetch_endpoint(locale, theme) for locale in Locale for theme in SourceTheme)
+            )
+        )
+        return _Cycle(SyncSource.LEGACY, legacy, stage + legacy)
+
     async def _create_run_audit(
         self,
         trigger: SyncTrigger,
-        outcomes: list[_EndpointOutcome],
+        cycle: _Cycle,
         now: datetime,
     ) -> int:
-        successful = [outcome for outcome in outcomes if outcome.succeeded]
-        failed = [outcome for outcome in outcomes if not outcome.succeeded]
+        successful = [outcome for outcome in cycle.data if outcome.succeeded]
+        failed = [outcome for outcome in cycle.data if not outcome.succeeded]
         records_seen = sum(
             len(outcome.payload.events) + outcome.payload.invalid_records
             for outcome in successful
@@ -163,14 +204,16 @@ class SyncService:
                 )
                 sync_run = SyncRun(
                     trigger=trigger,
+                    source=cycle.source,
                     status=SyncRunStatus.RUNNING,
                     is_baseline=baseline_completed_at is None,
                     successful_endpoints=len(successful),
                     failed_endpoints=len(failed),
                     records_seen=records_seen,
                     error_summary={
-                        f"{outcome.locale.value}:{outcome.theme.value}": outcome.error_code
-                        for outcome in failed
+                        outcome.key: outcome.error_code
+                        for outcome in cycle.attempted
+                        if not outcome.succeeded
                     },
                     started_at=now,
                 )
@@ -191,6 +234,29 @@ class SyncService:
                     "database": "transaction_failed",
                 }
 
+    async def _fetch_stage_endpoint(self, locale: Locale) -> _EndpointOutcome:
+        try:
+            payload = await self._source.fetch_stage(locale)
+        except TerriconRequestError as error:
+            self._logger.warning(
+                "Terricon eventsByStage failed after retries",
+                extra={
+                    "attempts": error.attempts,
+                    "error_code": error.code,
+                    "locale": locale.value,
+                },
+            )
+            return _EndpointOutcome(
+                SyncSource.STAGE, locale, None, None, error.code, error.attempts
+            )
+        except Exception as error:
+            self._logger.exception(
+                "Unexpected Terricon eventsByStage failure",
+                extra={"error_code": type(error).__name__, "locale": locale.value},
+            )
+            return _EndpointOutcome(SyncSource.STAGE, locale, None, None, "unexpected_error", 1)
+        return _EndpointOutcome(SyncSource.STAGE, locale, None, payload, None, payload.attempts)
+
     async def _fetch_endpoint(self, locale: Locale, theme: SourceTheme) -> _EndpointOutcome:
         try:
             payload = await self._source.fetch_detailed(locale, theme)
@@ -204,7 +270,9 @@ class SyncService:
                     "source_theme": theme.value,
                 },
             )
-            return _EndpointOutcome(locale, theme, None, error.code, error.attempts)
+            return _EndpointOutcome(
+                SyncSource.LEGACY, locale, theme, None, error.code, error.attempts
+            )
         except Exception as error:
             self._logger.exception(
                 "Unexpected Terricon endpoint failure",
@@ -214,8 +282,8 @@ class SyncService:
                     "source_theme": theme.value,
                 },
             )
-            return _EndpointOutcome(locale, theme, None, "unexpected_error", 1)
-        return _EndpointOutcome(locale, theme, payload, None, payload.attempts)
+            return _EndpointOutcome(SyncSource.LEGACY, locale, theme, None, "unexpected_error", 1)
+        return _EndpointOutcome(SyncSource.LEGACY, locale, theme, payload, None, payload.attempts)
 
     def _normalized_now(self) -> datetime:
         value = self._clock()
@@ -227,14 +295,14 @@ class SyncService:
         self,
         session: AsyncSession,
         sync_run_id: int,
-        outcomes: list[_EndpointOutcome],
+        cycle: _Cycle,
         now: datetime,
     ) -> SyncResult:
-        successful = [outcome for outcome in outcomes if outcome.succeeded]
-        failed = [outcome for outcome in outcomes if not outcome.succeeded]
+        successful = [outcome for outcome in cycle.data if outcome.succeeded]
+        failed = [outcome for outcome in cycle.data if not outcome.succeeded]
         status = (
             SyncRunStatus.SUCCEEDED
-            if len(successful) == len(Locale) * len(SourceTheme)
+            if not failed
             else SyncRunStatus.PARTIAL
             if successful
             else SyncRunStatus.FAILED
@@ -261,51 +329,43 @@ class SyncService:
         alerts: dict[str, _AlertData] = {}
         resolved_alerts: set[str] = set()
         await self._update_endpoint_tracking(
-            session, sync_run.id, outcomes, now, alerts, resolved_alerts
+            session, sync_run.id, cycle, now, alerts, resolved_alerts
         )
+        await self._track_source(session, sync_state, cycle, now, alerts, resolved_alerts)
 
         merged, merge_alerts = self._merge_successful_payloads(successful)
         alerts.update(merge_alerts)
         full_success = status is SyncRunStatus.SUCCEEDED
         if full_success:
+            resolved_kinds = ["source_common_mismatch", "source_theme_collision"]
+            if cycle.source is SyncSource.STAGE:
+                # Fresh primary data supersedes failures of the fallback endpoints.
+                resolved_kinds.append("sync_endpoint_failure")
             resolved_alerts.update(
                 (
                     await session.scalars(
                         select(AdminAlert.fingerprint).where(
-                            AdminAlert.kind.in_(
-                                ("source_common_mismatch", "source_theme_collision")
-                            ),
+                            AdminAlert.kind.in_(resolved_kinds),
                             AdminAlert.resolved_at.is_(None),
                         )
                     )
                 ).all()
             )
-        complete_themes = {
-            theme
-            for theme in SourceTheme
-            if all(
-                any(
-                    outcome.succeeded and outcome.locale is locale and outcome.theme is theme
-                    for outcome in outcomes
-                )
-                for locale in Locale
-            )
-        }
-        observed_by_theme: dict[SourceTheme, set[int]] = defaultdict(set)
         observed_all: set[int] = set()
         for outcome in successful:
             payload = outcome.payload
             if payload is None:  # pragma: no cover - filtered by succeeded
                 raise RuntimeError("Successful endpoint has no payload")
-            observed_by_theme[outcome.theme].update(payload.observed_source_ids)
             observed_all.update(payload.observed_source_ids)
 
+        # Only a complete eventsByStage cycle lists every event. getAllEvents lacks
+        # programs, so absence during a fallback must not count towards hiding.
+        count_missing = full_success and cycle.source is SyncSource.STAGE
         created, updated_events, hidden = await self._merge_events(
             session,
             merged,
             observed_all,
-            observed_by_theme,
-            complete_themes,
+            count_missing,
             baseline_before,
             now,
         )
@@ -330,24 +390,53 @@ class SyncService:
             baseline_completed=baseline_completed,
         )
 
+    async def _track_source(
+        self,
+        session: AsyncSession,
+        sync_state: SyncState,
+        cycle: _Cycle,
+        now: datetime,
+        alerts: dict[str, _AlertData],
+        resolved_alerts: set[str],
+    ) -> None:
+        if cycle.source is SyncSource.STAGE:
+            sync_state.fallback_since = None
+            resolved_alerts.add(_FALLBACK_ALERT)
+            return
+        if sync_state.fallback_since is None:
+            sync_state.fallback_since = now
+        if now - sync_state.fallback_since >= self._fallback_alert_after:
+            alerts[_FALLBACK_ALERT] = _AlertData(
+                kind=_FALLBACK_ALERT,
+                details={
+                    "since": sync_state.fallback_since.astimezone(UTC).isoformat(),
+                    "stage_errors": {
+                        outcome.key: outcome.error_code
+                        for outcome in cycle.attempted
+                        if outcome.source is SyncSource.STAGE and not outcome.succeeded
+                    },
+                },
+            )
+
     async def _update_endpoint_tracking(
         self,
         session: AsyncSession,
         sync_run_id: int,
-        outcomes: list[_EndpointOutcome],
+        cycle: _Cycle,
         now: datetime,
         alerts: dict[str, _AlertData],
         resolved_alerts: set[str],
     ) -> None:
         states = {
-            (state.locale, state.source_theme): state
+            (state.source, state.locale, state.source_theme): state
             for state in (await session.scalars(select(SyncEndpointState))).all()
         }
-        for outcome in outcomes:
-            key = (outcome.locale, outcome.theme)
+        for outcome in cycle.attempted:
+            key = (outcome.source, outcome.locale, outcome.theme)
             state = states.get(key)
             if state is None:
                 state = SyncEndpointState(
+                    source=outcome.source,
                     locale=outcome.locale,
                     source_theme=outcome.theme,
                     consecutive_failures=0,
@@ -355,7 +444,7 @@ class SyncService:
                 session.add(state)
                 states[key] = state
             state.last_attempt_at = now
-            fingerprint = f"sync_endpoint:{outcome.locale.value}:{outcome.theme.value}"
+            fingerprint = f"sync_endpoint:{outcome.key}"
             if outcome.succeeded:
                 if outcome.payload is None:  # pragma: no cover - narrowed by succeeded
                     raise RuntimeError("Successful endpoint has no payload")
@@ -372,17 +461,23 @@ class SyncService:
                 state.last_error_code = outcome.error_code
                 endpoint_status = SyncEndpointStatus.FAILED
                 records_seen = 0
-                alerts[fingerprint] = _AlertData(
-                    kind="sync_endpoint_failure",
-                    details={
-                        "error_code": outcome.error_code,
-                        "locale": outcome.locale.value,
-                        "source_theme": outcome.theme.value,
-                    },
-                )
+                # A failing primary endpoint is covered by the fallback; only its
+                # prolonged use is reported (see _track_source).
+                if outcome.source is SyncSource.LEGACY:
+                    alerts[fingerprint] = _AlertData(
+                        kind="sync_endpoint_failure",
+                        details={
+                            "error_code": outcome.error_code,
+                            "locale": outcome.locale.value,
+                            "source_theme": outcome.theme.value
+                            if outcome.theme is not None
+                            else None,
+                        },
+                    )
             session.add(
                 SyncRunEndpoint(
                     sync_run_id=sync_run_id,
+                    source=outcome.source,
                     locale=outcome.locale,
                     source_theme=outcome.theme,
                     status=endpoint_status,
@@ -401,7 +496,10 @@ class SyncService:
         grouped: dict[int, list[SourceEvent]] = defaultdict(list)
         for outcome in sorted(
             outcomes,
-            key=lambda value: (_THEME_PRIORITY[value.theme], _LOCALE_PRIORITY[value.locale]),
+            key=lambda value: (
+                _THEME_PRIORITY[value.theme] if value.theme is not None else -1,
+                _LOCALE_PRIORITY[value.locale],
+            ),
         ):
             if outcome.payload is None:  # pragma: no cover - successful outcomes only
                 raise RuntimeError("Successful endpoint has no payload")
@@ -453,8 +551,7 @@ class SyncService:
         session: AsyncSession,
         merged: Mapping[int, _MergedEvent],
         observed_all: set[int],
-        observed_by_theme: Mapping[SourceTheme, set[int]],
-        complete_themes: set[SourceTheme],
+        count_missing: bool,
         baseline_before: bool,
         now: datetime,
     ) -> tuple[int, int, int]:
@@ -468,11 +565,8 @@ class SyncService:
                     )
                 ).all()
             )
-        if complete_themes:
-            missing_candidates = select(Event).where(
-                Event.source_theme.in_(complete_themes),
-                Event.is_available.is_(True),
-            )
+        if count_missing:
+            missing_candidates = select(Event).where(Event.is_available.is_(True))
             if relevant_ids:
                 missing_candidates = missing_candidates.where(Event.source_id.not_in(relevant_ids))
             db_events.extend((await session.scalars(missing_candidates.with_for_update())).all())
@@ -488,6 +582,7 @@ class SyncService:
                 starts_at=common.starts_at,
                 event_format=common.event_format,
                 event_languages=list(common.event_languages),
+                event_type=common.event_type,
                 address=common.address,
                 registration_url=common.registration_url,
                 recording_url=common.recording_url,
@@ -544,6 +639,9 @@ class SyncService:
         created = len(new_source_ids)
         updated_events = 0
         hidden = 0
+        today_start = datetime.combine(
+            now.astimezone(self._timezone).date(), time.min, self._timezone
+        ).astimezone(UTC)
         for source_id, incoming in merged.items():
             event = events_by_source[source_id]
             is_new = source_id in new_source_ids
@@ -561,6 +659,8 @@ class SyncService:
             if event.source_theme is not incoming.common.source_theme:
                 material_changed = True
                 event.source_theme = incoming.common.source_theme
+            # Display metadata only: filling it for existing events is not a change.
+            event.event_type = incoming.common.event_type
             if not event.is_available or event.state is EventState.HIDDEN:
                 material_changed = True
                 event.is_available = True
@@ -653,7 +753,9 @@ class SyncService:
                     event,
                     classification,
                     semantic_hash_value=new_semantic_hash,
-                    notify_new=is_new and baseline_before,
+                    # Events already past their day (archive history of a new
+                    # source) are stored silently.
+                    notify_new=is_new and baseline_before and event.starts_at >= today_start,
                     now=now,
                 )
                 classifications[event.id] = classification
@@ -689,11 +791,9 @@ class SyncService:
                 event.missing_streak = 0
 
         for event in db_events:
-            if event.source_theme not in complete_themes:
+            if not count_missing or not event.is_available:
                 continue
-            if not event.is_available:
-                continue
-            if event.source_id in observed_by_theme.get(event.source_theme, set()):
+            if event.source_id in observed_all:
                 continue
             event.missing_streak += 1
             if event.missing_streak < 2:

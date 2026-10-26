@@ -29,6 +29,7 @@ from terricon_events_bot.domain.enums import (
     BroadcastStatus,
     FeedbackAuthor,
     Locale,
+    SyncSource,
     SyncTrigger,
     TicketStatus,
 )
@@ -415,7 +416,9 @@ class AdminTelegramController:
         status = await self._admin.status()
         endpoint_lines = [
             (
-                f"- {endpoint.locale.value}/{endpoint.source_theme.value}: "
+                f"- {endpoint.source.value}/{endpoint.locale.value}"
+                + (f"/{endpoint.source_theme.value}" if endpoint.source_theme else "")
+                + ": "
                 f"{endpoint.last_status.value if endpoint.last_status else 'нет данных'}; "
                 f"ошибок подряд {endpoint.consecutive_failures}; "
                 f"последний успех {endpoint.last_success_at or 'нет'}"
@@ -423,8 +426,15 @@ class AdminTelegramController:
             )
             for endpoint in status.endpoints
         ]
+        if status.source is SyncSource.STAGE:
+            source = "eventsByStage (основной)"
+        elif status.source is SyncSource.LEGACY:
+            source = f"резерв getAllEvents с {status.fallback_since or 'нет данных'}"
+        else:
+            source = "нет данных"
         return (
             "Состояние приложения\n"
+            f"Источник: {source}\n"
             f"Baseline: {status.baseline_completed_at or 'нет'}\n"
             f"Последняя полная синхронизация: {status.last_full_success_at or 'нет'}\n"
             f"Endpoint с ошибками: {status.endpoint_failures}\n"

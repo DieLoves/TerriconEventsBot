@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -11,12 +12,19 @@ from aiogram import Bot, Dispatcher, Router
 from aiogram.types import Update
 from test_telegram_flow import FakeTelegramSession, message_payload
 
+from terricon_events_bot.application.admin import AdminEndpointStatus, AdminService, AdminStatus
 from terricon_events_bot.application.broadcasts import BroadcastDraft, BroadcastService
 from terricon_events_bot.application.catalog import CatalogQuery, CatalogStateStore
 from terricon_events_bot.application.feedback import FeedbackService
 from terricon_events_bot.application.subscriptions import SubscriptionService
 from terricon_events_bot.application.users import UserContext, UserService
-from terricon_events_bot.domain.enums import BroadcastAudience, BroadcastStatus, Locale
+from terricon_events_bot.domain.enums import (
+    BroadcastAudience,
+    BroadcastStatus,
+    Locale,
+    SourceTheme,
+    SyncSource,
+)
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.localization import LocalizationCatalog
@@ -166,3 +174,47 @@ async def test_admin_cancel_drops_pending_reply_and_broadcast_draft(tmp_path: Pa
     gateway.send_user_reply.assert_not_awaited()
     renderer.render.assert_not_awaited()
     assert len(session.methods) == 1
+
+
+@pytest.mark.asyncio
+async def test_status_shows_the_source_and_fallback_start() -> None:
+    since = datetime(2030, 1, 10, 6, tzinfo=UTC)
+    admin = Mock(spec=AdminService)
+    admin.status = AsyncMock(
+        return_value=AdminStatus(
+            baseline_completed_at=since,
+            last_full_success_at=since,
+            endpoint_failures=1,
+            endpoints=(
+                AdminEndpointStatus(SyncSource.STAGE, Locale.KZ, None, None, 2, None, "timeout"),
+                AdminEndpointStatus(
+                    SyncSource.LEGACY,
+                    Locale.RU,
+                    SourceTheme.IT,
+                    None,
+                    0,
+                    since,
+                    None,
+                ),
+            ),
+            pending_classifications=0,
+            pending_outbox=0,
+            unfinished_broadcasts=0,
+            source=SyncSource.LEGACY,
+            fallback_since=since,
+        )
+    )
+    controller = AdminTelegramController(
+        cast(AdminService, admin),
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+        cast(Any, Mock()),
+    )
+
+    text = await controller._status_text()
+
+    assert f"Источник: резерв getAllEvents с {since}" in text  # noqa: RUF001
+    assert "- stage/kz: нет данных; ошибок подряд 2" in text
+    assert "- legacy/ru/it: нет данных" in text

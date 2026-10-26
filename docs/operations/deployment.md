@@ -29,7 +29,7 @@ BACKUP_DIR=/var/backups/terricon-events-bot ./scripts/backup.sh
 ## Проверка восстановления
 
 Проверка поднимает изолированный временный PostgreSQL 17 на `tmpfs`, восстанавливает архив,
-проверяет точный Alembic revision `0011_groq_shared_quota` и наличие не менее 26 публичных
+проверяет точный Alembic revision `0012_hybrid_source` и наличие не менее 26 публичных
 таблиц, затем всегда удаляет контейнер. Production database и её volume не изменяются.
 
 Последний архив из `BACKUP_DIR`:
@@ -116,6 +116,22 @@ preflight выполнить upgrade head; очистка таблиц/volume н
 backup/build/migrate/preflight; сам production restart выполняется отдельно.
 Проверки: [этап9 smoke](groq-smoke-2026-10-21.md),
 [этап10 и общие квоты](groq-stage10-2026-10-21.md).
+
+## Гибридный источник (2026-10-26)
+
+Миграция `0012_hybrid_source` добавляет источник цикла, вид события, подписку на
+программы и ключи endpoint `stage`/`legacy`. Перед её применением backup проверяется
+ещё по прежней ревизии:
+
+```bash
+EXPECTED_SCHEMA_REVISION=0011_groq_shared_quota ./scripts/restore-smoke.sh "$backup_path"
+```
+
+Новые настройки необязательны: `STAGE_URL` по умолчанию — соседний с `BASE_URL`
+`…/eventsByStage`, `SOURCE_FALLBACK_ALERT_HOURS=24`. `terricon-api-smoke` проверяет
+8 endpoint (6 `getAllEvents` + 2 `eventsByStage`). Первый цикл после выкатки добавляет
+записи `eventsByStage` (~81) без уведомлений о прошедших; в `/status` строка
+«Источник: eventsByStage (основной)».
 
 ## Beta и public mode
 

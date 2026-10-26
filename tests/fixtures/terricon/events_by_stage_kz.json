@@ -1,0 +1,223 @@
+{
+  "eventsNew": [
+    {
+      "id": 901,
+      "uid": "-30.10",
+      "type": "default",
+      "type_text": {
+        "ru": "Synthetic",
+        "kz": "Synthetic"
+      },
+      "card_type": "default",
+      "url": "https://terricon.kz/kz/neconf",
+      "eventType": "neconf",
+      "address": "-",
+      "shortDesc": "Synthetic short description",
+      "card_info": {
+        "name": "Synthetic neconf (kz)",
+        "complete_url": "https://terricon.kz/neconf-links",
+        "language": [
+          "-"
+        ],
+        "description": "\nSynthetic neconf description",
+        "url_live": "https://terricon.kz/neconf-links",
+        "to_whom": "-",
+        "date_start": {
+          "unix": 1895146200,
+          "iso": "2030-01-20T13:30:00.000Z",
+          "text": "synthetic"
+        }
+      },
+      "leads_info": {
+        "url_photo": "https://images.example/901.jpg",
+        "format": {
+          "id": "online_and_offline",
+          "formated": "synthetic"
+        },
+        "tags": [
+          "it",
+          "business"
+        ],
+        "status": "unknown_status"
+      },
+      "contact": {
+        "first_name": "-",
+        "last_name": "-",
+        "full_name": "- -",
+        "role": "-"
+      }
+    },
+    {
+      "id": 501,
+      "uid": "fixture20.01",
+      "type": "marketing",
+      "type_text": {
+        "ru": "Synthetic",
+        "kz": "Synthetic"
+      },
+      "card_type": "default",
+      "url": "https://terricon.kz/kz/marketing",
+      "eventType": "lecture",
+      "address": "Fixture Hall",
+      "shortDesc": "Synthetic short description",
+      "card_info": {
+        "name": "Synthetic theme lecture (kz)",
+        "complete_url": "https://registration.example/lecture",
+        "language": [
+          "русский"
+        ],
+        "description": "Synthetic program description",
+        "url_live": "https://registration.example/lecture",
+        "to_whom": "Everyone",
+        "date_start": {
+          "unix": 1895133600,
+          "iso": "2030-01-20T10:00:00.000Z",
+          "text": "synthetic"
+        }
+      },
+      "leads_info": {
+        "url_photo": "https://images.example/501.jpg",
+        "format": {
+          "id": "online_and_offline",
+          "formated": "synthetic"
+        },
+        "tags": [
+          "marketing"
+        ],
+        "status": "new_mitap"
+      },
+      "contact": {
+        "first_name": "Test",
+        "last_name": "Speaker",
+        "full_name": "Test Speaker",
+        "role": "Speaker"
+      }
+    }
+  ],
+  "eventsPreparation": [
+    {
+      "id": 902,
+      "uid": "-01.02",
+      "type": "business",
+      "card_type": "default",
+      "url": "https://terricon.kz/kz/accelerator",
+      "eventType": "accelerator",
+      "address": "-",
+      "shortDesc": "Synthetic short description",
+      "card_info": {
+        "name": "Synthetic accelerator (kz)",
+        "complete_url": "/",
+        "language": [
+          "-"
+        ],
+        "description": "-",
+        "url_live": "/",
+        "to_whom": "-",
+        "date_start": {
+          "unix": 1896148800,
+          "iso": "2030-02-01T04:00:00.000Z",
+          "text": "synthetic"
+        }
+      },
+      "leads_info": {
+        "url_photo": "https://images.example/902.jpg",
+        "format": {
+          "id": "online_and_offline",
+          "formated": "synthetic"
+        },
+        "tags": [
+          "business"
+        ],
+        "status": "unknown_status"
+      },
+      "contact": {
+        "first_name": "-",
+        "last_name": "-",
+        "full_name": "- -",
+        "role": "-"
+      }
+    },
+    {
+      "id": 903,
+      "uid": "-05.01",
+      "type": "it",
+      "card_type": "default",
+      "url": "https://terricon.kz/kz/python",
+      "eventType": "OC",
+      "address": "-",
+      "shortDesc": "Synthetic short description",
+      "card_info": {
+        "name": "Synthetic course (kz)",
+        "complete_url": "https://registration.example/course",
+        "language": [
+          "-"
+        ],
+        "description": "Synthetic program description",
+        "url_live": "https://registration.example/course",
+        "to_whom": "-",
+        "date_start": {
+          "unix": 1893848400,
+          "iso": "2030-01-05T13:00:00.000Z",
+          "text": "synthetic"
+        }
+      },
+      "leads_info": {
+        "url_photo": "https://images.example/903.jpg",
+        "format": {
+          "id": "online",
+          "formated": "synthetic"
+        },
+        "tags": [
+          "it"
+        ],
+        "status": "unknown_status"
+      },
+      "contact": {
+        "first_name": "-",
+        "last_name": "-",
+        "full_name": "- -",
+        "role": "-"
+      }
+    },
+    {
+      "id": 904,
+      "uid": "-12.12",
+      "type": "default",
+      "card_type": "default",
+      "url": "https://partner.example/conference",
+      "eventType": "workshop",
+      "address": "-",
+      "shortDesc": "Synthetic short description",
+      "card_info": {
+        "name": "Synthetic partner conference (kz)",
+        "complete_url": "-",
+        "language": [
+          "-"
+        ],
+        "description": "Synthetic program description",
+        "url_live": "-",
+        "to_whom": "-",
+        "date_start": {
+          "unix": 1891746000,
+          "iso": "2029-12-12T05:00:00.000Z",
+          "text": "synthetic"
+        }
+      },
+      "leads_info": {
+        "url_photo": "https://images.example/904.jpg",
+        "format": {
+          "id": "offline",
+          "formated": "synthetic"
+        },
+        "tags": [],
+        "status": "unknown_status"
+      },
+      "contact": {
+        "first_name": "-",
+        "last_name": "-",
+        "full_name": "- -",
+        "role": "-"
+      }
+    }
+  ]
+}

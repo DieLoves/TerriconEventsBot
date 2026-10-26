@@ -106,3 +106,25 @@ async def test_replace_rejects_invalid_modes_without_mutating_state(
         await service.replace(user_id, SubscriptionMode.ALL, (CategorySlug.AI_DATA,))
 
     assert (await service.get(user_id)).subscribe_all
+
+
+@pytest.mark.asyncio
+async def test_program_toggle_is_independent_of_event_subscriptions(
+    subscription_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession], int],
+) -> None:
+    _, session_factory, user_id = subscription_database
+    service = SubscriptionService(session_factory)
+
+    enabled = await service.toggle_programs(user_id)
+    with_all = await service.toggle_all(user_id)
+    with_category = await service.toggle_category(user_id, CategorySlug.AI_DATA)
+    disabled = await service.toggle_programs(user_id)
+
+    assert enabled.programs and not enabled.subscribe_all and enabled.categories == ()
+    assert with_all.programs and with_all.subscribe_all
+    assert with_category.programs and with_category.categories == (CategorySlug.AI_DATA,)
+    assert not disabled.programs and disabled.categories == (CategorySlug.AI_DATA,)
+    assert (await service.get(user_id)) == disabled
+    async with session_factory() as session:
+        user = await session.get(User, user_id)
+    assert user is not None and not user.program_notifications

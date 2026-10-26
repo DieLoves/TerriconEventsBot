@@ -31,6 +31,17 @@ _LANGUAGE_MAP = {
 }
 _ACTIVE_STATUSES = {"new_mitap"}
 _ARCHIVE_STATUSES = {"end_mitap"}
+# Program records of eventsByStage: the site page carries the application form and
+# the card or the date decides between registration and materials.
+_DATE_STATUSES = {"unknown_status"}
+# Placeholders the source uses instead of empty values.
+_STUBS = {"-", "/", "- -"}
+_THEME_TAG_PRIORITY = (SourceTheme.IT, SourceTheme.BUSINESS, SourceTheme.MARKETING)
+_SITE_HOSTS = {"terricon.kz", "www.terricon.kz"}
+_THEME_PAGE = re.compile(r"^/(?:ru|kz)/(?:it|business|marketing)/?$")
+_SITE_LOCALE_PREFIX = re.compile(r"^/kz(?=/|$)")
+_SITE_FORM_ANCHOR = "form"
+_EVENT_TYPE_LIMIT = 64
 _DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _MAX_URL_LENGTH = 2048
 # RFC 3986 fragment characters; anything else is dropped rather than passed on.
@@ -41,8 +52,14 @@ class NormalizationError(ValueError):
     pass
 
 
+def _is_stub(value: str) -> bool:
+    return " ".join(value.split()) in _STUBS
+
+
 def _clean_optional(value: str) -> str | None:
     normalized = " ".join(value.split())
+    if normalized in _STUBS:
+        return None
     return normalized or None
 
 
@@ -53,7 +70,10 @@ def _clean_multiline_optional(value: str) -> str | None:
         lines.pop(0)
     while lines and not lines[-1]:
         lines.pop()
-    return "\n".join(lines) or None
+    cleaned = "\n".join(lines)
+    if cleaned in _STUBS:
+        return None
+    return cleaned or None
 
 
 def normalize_http_url(value: str, *, keep_fragment: bool = False) -> str | None:
@@ -120,6 +140,32 @@ def site_event_url(page_url: str | None, uid: str) -> str | None:
     return urlunsplit(urlsplit(page_url)._replace(fragment=quote(uid.strip(), safe="")))
 
 
+def site_page_url(page_url: str | None, uid: str) -> str | None:
+    """Link to the event on its site page.
+
+    Theme pages open the registration form by the event ``uid``; program pages
+    (neconf, hackathon, courses) have a ``#form`` anchor before their form instead.
+    """
+    if page_url is None:
+        return None
+    parsed = urlsplit(page_url)
+    if (parsed.hostname or "") not in _SITE_HOSTS:
+        return page_url
+    if _THEME_PAGE.fullmatch(parsed.path) is not None:
+        return site_event_url(page_url, uid)
+    return urlunsplit(parsed._replace(fragment=_SITE_FORM_ANCHOR))
+
+
+def canonical_site_url(url: str | None) -> str | None:
+    """Locale-neutral form of a site link, so RU and KZ records agree on it."""
+    if url is None:
+        return None
+    parsed = urlsplit(url)
+    if (parsed.hostname or "") not in _SITE_HOSTS:
+        return url
+    return urlunsplit(parsed._replace(path=_SITE_LOCALE_PREFIX.sub("/ru", parsed.path)))
+
+
 def registration_link(registration_url: str | None, details_url: str | None) -> str | None:
     """Prefer the site registration form over the external short link.
 
@@ -150,7 +196,7 @@ def _normalize_languages(values: list[str]) -> tuple[tuple[str, ...], list[Norma
     issues: list[NormalizationIssue] = []
     for value in values:
         compact = unicodedata.normalize("NFKC", value).strip().casefold()
-        if not compact:
+        if not compact or compact in _STUBS:
             continue
         language = _LANGUAGE_MAP.get(compact)
         if language is None:
@@ -176,17 +222,32 @@ def _normalize_date(value: datetime, unix: int) -> tuple[datetime, list[Normaliz
 
 
 def _normalize_url(value: str, field: str, issues: list[NormalizationIssue]) -> str | None:
+    if _is_stub(value):
+        return None
     normalized = normalize_http_url(value)
     if value.strip() and normalized is None:
         issues.append(NormalizationIssue("invalid_url", field, "invalid"))
     return normalized
 
 
+def _source_theme(dto: TerriconEventDTO) -> SourceTheme:
+    """Theme of an eventsByStage record; ``default`` records fall back to their tags."""
+    raw_theme = dto.type.strip().casefold()
+    if raw_theme in SourceTheme._value2member_map_:
+        return SourceTheme(raw_theme)
+    tags = {tag.strip().casefold() for tag in dto.leads_info.tags}
+    for theme in _THEME_TAG_PRIORITY:
+        if theme.value in tags:
+            return theme
+    return SourceTheme.IT
+
+
 def normalize_event(
     dto: TerriconEventDTO,
     locale: Locale,
-    expected_theme: SourceTheme,
+    expected_theme: SourceTheme | None,
 ) -> tuple[SourceEvent, tuple[NormalizationIssue, ...]]:
+    """Normalize one record; ``expected_theme`` is the theme endpoint, if any."""
     issues: list[NormalizationIssue] = []
     starts_at, date_issues = _normalize_date(
         dto.card_info.date_start.iso, dto.card_info.date_start.unix
@@ -201,11 +262,15 @@ def normalize_event(
     event_languages, language_issues = _normalize_languages(dto.card_info.language)
     issues.extend(language_issues)
 
-    raw_theme = dto.type.strip().casefold()
-    if raw_theme != expected_theme.value:
-        issues.append(NormalizationIssue("theme_mismatch", "type", raw_theme))
+    if expected_theme is None:
+        source_theme = _source_theme(dto)
+    else:
+        source_theme = expected_theme
+        raw_theme = dto.type.strip().casefold()
+        if raw_theme != expected_theme.value:
+            issues.append(NormalizationIssue("theme_mismatch", "type", raw_theme))
 
-    details_url = site_event_url(_normalize_url(dto.url, "url", issues), dto.uid)
+    details_url = site_page_url(_normalize_url(dto.url, "url", issues), dto.uid)
     complete_url = _normalize_url(dto.card_info.complete_url, "complete_url", issues)
     live_url = _normalize_url(dto.card_info.url_live, "url_live", issues)
     if complete_url and live_url and complete_url != live_url:
@@ -218,6 +283,9 @@ def normalize_event(
     if status in _ACTIVE_STATUSES:
         registration_url = action_url
     elif status in _ARCHIVE_STATUSES:
+        recording_url = action_url
+    elif status in _DATE_STATUSES:
+        registration_url = canonical_site_url(details_url) or action_url
         recording_url = action_url
     else:
         registration_url = action_url
@@ -252,7 +320,7 @@ def normalize_event(
     return (
         SourceEvent(
             source_id=dto.id,
-            source_theme=expected_theme,
+            source_theme=source_theme,
             starts_at=starts_at,
             event_format=event_format,
             event_languages=event_languages,
@@ -261,6 +329,7 @@ def normalize_event(
             recording_url=recording_url,
             poster_url=poster_url,
             localization=localization,
+            event_type=dto.event_type.strip().casefold()[:_EVENT_TYPE_LIMIT] or None,
         ),
         tuple(issues),
     )

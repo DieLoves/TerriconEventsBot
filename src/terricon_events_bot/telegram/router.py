@@ -10,7 +10,12 @@ from aiogram.types import CallbackQuery, Message
 from terricon_events_bot.application.catalog import CatalogQuery, CatalogStateStore
 from terricon_events_bot.application.subscriptions import SubscriptionService
 from terricon_events_bot.application.users import UserService
-from terricon_events_bot.domain.catalog import CatalogFilter, CatalogPage, CatalogState
+from terricon_events_bot.domain.catalog import (
+    CatalogFilter,
+    CatalogPage,
+    CatalogScope,
+    CatalogState,
+)
 from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.telegram.callbacks import (
     CatalogAllCallback,
@@ -33,10 +38,13 @@ from terricon_events_bot.telegram.callbacks import (
     NavigationCallback,
     NavigationView,
     NoopCallback,
+    ProgramKindAllCallback,
+    ProgramKindCallback,
     SettingLocaleCallback,
     SettingToggleCallback,
     SubscriptionAllCallback,
     SubscriptionCategoryCallback,
+    SubscriptionProgramsCallback,
     ToggleSetting,
 )
 from terricon_events_bot.telegram.feedback import FeedbackTelegramController
@@ -124,9 +132,12 @@ class TelegramController:
         view = callback_data.view
         if view is NavigationView.MENU:
             screen = self._views.main_menu(current_user)
-        elif view is NavigationView.EVENTS:
-            state = await self._catalog_state.load(current_user.id)
-            await self._render_catalog(callback, current_user, replace(state, page=1))
+        elif view in (NavigationView.EVENTS, NavigationView.PROGRAMS):
+            scope = (
+                CatalogScope.PROGRAMS if view is NavigationView.PROGRAMS else CatalogScope.EVENTS
+            )
+            state = await self._catalog_state.switch(current_user.id, scope)
+            await self._render_catalog(callback, current_user, state)
             return
         elif view is NavigationView.CATEGORIES:
             screen = self._views.categories(
@@ -203,14 +214,37 @@ class TelegramController:
         state = await self._catalog_state.load(current_user.id)
         reset = state.with_filters(
             replace(
-                CatalogFilter.default(state.filters.section),
+                CatalogFilter.default(state.filters.section, state.filters.scope),
                 category=state.filters.category,
+                program_kind=state.filters.program_kind,
             )
         )
         if callback_data.view is NavigationView.FILTERS:
             await self._save_and_show_filters(callback, current_user, reset)
         else:
             await self._show_catalog(callback, current_user, reset)
+
+    async def select_program_kind(
+        self,
+        callback: CallbackQuery,
+        callback_data: ProgramKindCallback,
+        current_user: User,
+    ) -> None:
+        state = await self._catalog_state.switch(current_user.id, CatalogScope.PROGRAMS)
+        try:
+            filters = replace(state.filters, program_kind=callback_data.kind)
+        except ValueError:
+            await self._show_invalid(callback, current_user)
+            return
+        await self._show_catalog(callback, current_user, state.with_filters(filters))
+
+    async def select_all_programs(self, callback: CallbackQuery, current_user: User) -> None:
+        state = await self._catalog_state.switch(current_user.id, CatalogScope.PROGRAMS)
+        await self._show_catalog(
+            callback,
+            current_user,
+            state.with_filters(replace(state.filters, program_kind=None)),
+        )
 
     async def select_page(
         self,
@@ -387,6 +421,19 @@ class TelegramController:
             callback, current_user, self._views.subscriptions(current_user, summary)
         )
 
+    async def toggle_subscription_programs(
+        self,
+        callback: CallbackQuery,
+        current_user: User,
+    ) -> None:
+        await self._answer(callback)
+        if not await self._require_onboarding(callback, current_user):
+            return
+        summary = await self._subscriptions.toggle_programs(current_user.id)
+        await self._render_callback(
+            callback, current_user, self._views.subscriptions(current_user, summary)
+        )
+
     async def noop(self, callback: CallbackQuery) -> None:
         await self._answer(callback)
 
@@ -542,6 +589,8 @@ def build_user_router(
     router.callback_query.register(controller.clear_format, CatalogFormatAllCallback.filter())
     router.callback_query.register(controller.select_language, CatalogLanguageCallback.filter())
     router.callback_query.register(controller.clear_language, CatalogLanguageAllCallback.filter())
+    router.callback_query.register(controller.select_program_kind, ProgramKindCallback.filter())
+    router.callback_query.register(controller.select_all_programs, ProgramKindAllCallback.filter())
     router.callback_query.register(controller.select_page, CatalogPageCallback.filter())
     router.callback_query.register(controller.show_event, EventCallback.filter())
     router.callback_query.register(controller.set_locale, SettingLocaleCallback.filter())
@@ -551,6 +600,9 @@ def build_user_router(
     )
     router.callback_query.register(
         controller.toggle_subscription_category, SubscriptionCategoryCallback.filter()
+    )
+    router.callback_query.register(
+        controller.toggle_subscription_programs, SubscriptionProgramsCallback.filter()
     )
     if feedback is not None:
         router.callback_query.register(feedback.choose_kind, FeedbackKindCallback.filter())

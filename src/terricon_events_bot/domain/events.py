@@ -29,6 +29,7 @@ class SourceEvent:
     recording_url: str | None
     poster_url: str | None
     localization: SourceEventLocalization
+    event_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

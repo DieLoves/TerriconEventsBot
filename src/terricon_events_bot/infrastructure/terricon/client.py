@@ -28,6 +28,8 @@ Clock = Callable[[], datetime]
 
 _DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 _DEFAULT_MAX_RETRY_DELAY_SECONDS = 60.0
+# eventsByStage groups are editorial stages, not upcoming/past: both are read.
+_STAGE_GROUPS = ("eventsNew", "eventsPreparation")
 
 
 class _ResponseTooLargeError(ValueError):
@@ -56,6 +58,7 @@ class TerriconClient:
         base_url: str,
         client: httpx.AsyncClient,
         *,
+        stage_url: str | None = None,
         timeout_seconds: float = 15.0,
         max_retries: int = 3,
         max_concurrency: int = 3,
@@ -77,6 +80,7 @@ class TerriconClient:
         if max_retry_delay_seconds <= 0:
             raise ValueError("max_retry_delay_seconds must be positive")
         self._base_url = base_url
+        self._stage_url = stage_url
         self._client = client
         self._timeout = timeout_seconds
         self._max_retries = max_retries
@@ -93,7 +97,28 @@ class TerriconClient:
         return list(payload.events)
 
     async def fetch_detailed(self, locale: Locale, theme: SourceTheme) -> EndpointPayload:
-        raw_records, attempts = await self._fetch_records(locale, theme)
+        raw_records, attempts = await self._fetch_records(
+            self._base_url, {"lang": locale.value, "theme": theme.value}, _theme_records
+        )
+        return self._payload(raw_records, attempts, locale, theme)
+
+    async def fetch_stage(self, locale: Locale) -> EndpointPayload:
+        """Fetch every record of ``eventsByStage``; themes come from the records."""
+        if self._stage_url is None:
+            raise TerriconRequestError("stage_disabled", 0)
+        raw_records, attempts = await self._fetch_records(
+            self._stage_url, {"lang": locale.value}, _stage_records
+        )
+        return self._payload(raw_records, attempts, locale, None)
+
+    def _payload(
+        self,
+        raw_records: list[Any],
+        attempts: int,
+        locale: Locale,
+        theme: SourceTheme | None,
+    ) -> EndpointPayload:
+        source_theme = theme.value if theme is not None else "stage"
         events: list[SourceEvent] = []
         observed_source_ids: set[int] = set()
         invalid_records = 0
@@ -113,7 +138,7 @@ class TerriconClient:
                     extra={
                         "error_code": "invalid_record",
                         "locale": locale.value,
-                        "source_theme": theme.value,
+                        "source_theme": source_theme,
                         "record_index": index,
                         "validation_error": type(error).__name__,
                     },
@@ -128,7 +153,7 @@ class TerriconClient:
                         "field": issue.field,
                         "locale": locale.value,
                         "source_id": event.source_id,
-                        "source_theme": theme.value,
+                        "source_theme": source_theme,
                         "source_value": issue.value[:128],
                     },
                 )
@@ -143,7 +168,12 @@ class TerriconClient:
             attempts=attempts,
         )
 
-    async def _fetch_records(self, locale: Locale, theme: SourceTheme) -> tuple[list[Any], int]:
+    async def _fetch_records(
+        self,
+        url: str,
+        params: dict[str, str],
+        records: Callable[[Any], list[Any] | None],
+    ) -> tuple[list[Any], int]:
         attempts_limit = self._max_retries + 1
         for attempt in range(1, attempts_limit + 1):
             response: httpx.Response | None = None
@@ -152,8 +182,8 @@ class TerriconClient:
                 async with self._semaphore:
                     async with self._client.stream(
                         "GET",
-                        self._base_url,
-                        params={"lang": locale.value, "theme": theme.value},
+                        url,
+                        params=params,
                         timeout=self._timeout,
                     ) as response:
                         if 200 <= response.status_code < 300:
@@ -164,8 +194,9 @@ class TerriconClient:
                             except (UnicodeDecodeError, json.JSONDecodeError):
                                 error_code = "invalid_json"
                             else:
-                                if isinstance(payload, list):
-                                    return payload, attempt
+                                extracted = records(payload)
+                                if extracted is not None:
+                                    return extracted, attempt
                                 error_code = "invalid_response_shape"
                         elif response.status_code == 429 or response.status_code >= 500:
                             error_code = f"http_{response.status_code}"
@@ -226,3 +257,16 @@ class TerriconClient:
         if not math.isfinite(seconds):
             return None
         return max(0.0, seconds)
+
+
+def _theme_records(payload: Any) -> list[Any] | None:
+    return payload if isinstance(payload, list) else None
+
+
+def _stage_records(payload: Any) -> list[Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    groups = [payload[group] for group in _STAGE_GROUPS if group in payload]
+    if not groups or not all(isinstance(group, list) for group in groups):
+        return None
+    return [record for group in groups for record in group]

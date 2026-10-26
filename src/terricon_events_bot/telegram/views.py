@@ -15,6 +15,7 @@ from terricon_events_bot.domain.catalog import (
     CatalogFilter,
     CatalogPage,
     CatalogPeriod,
+    CatalogScope,
     CatalogSection,
     CatalogState,
     EventDetails,
@@ -26,6 +27,13 @@ from terricon_events_bot.domain.enums import (
     FeedbackKind,
     Locale,
     TranslationSource,
+)
+from terricon_events_bot.domain.event_kinds import (
+    KIND_ICONS,
+    PROGRAM_KINDS,
+    EventKind,
+    event_kind,
+    is_program,
 )
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.models import User
@@ -56,10 +64,13 @@ from terricon_events_bot.telegram.callbacks import (
     NavigationCallback,
     NavigationView,
     NoopCallback,
+    ProgramKindAllCallback,
+    ProgramKindCallback,
     SettingLocaleCallback,
     SettingToggleCallback,
     SubscriptionAllCallback,
     SubscriptionCategoryCallback,
+    SubscriptionProgramsCallback,
     ToggleSetting,
 )
 from terricon_events_bot.telegram.rendering import Screen
@@ -70,7 +81,10 @@ _TITLE_LIMIT = 180
 _DESCRIPTION_CHUNK_LIMIT = 2800
 _SCREEN_TEXT_LIMIT = 4096
 _MENU_ROWS = (
-    (("menu.events", NavigationView.EVENTS, "🗓"),),
+    (
+        ("menu.events", NavigationView.EVENTS, "🗓"),
+        ("menu.programs", NavigationView.PROGRAMS, "🚀"),
+    ),
     (
         ("menu.subscriptions", NavigationView.SUBSCRIPTIONS, "🔔"),
         ("menu.settings", NavigationView.SETTINGS, "⚙️"),
@@ -81,6 +95,11 @@ _MENU_ROWS = (
     ),
 )
 _SECTION_ICONS = {CatalogSection.UPCOMING: "🗓", CatalogSection.ARCHIVE: "📦"}
+_PROGRAM_KIND_KEYS = {
+    EventKind.ACCELERATOR: "programs.accelerators",
+    EventKind.INCUBATOR: "programs.incubators",
+    EventKind.COURSE: "programs.courses",
+}
 _FEEDBACK_KIND_ICONS = {
     FeedbackKind.ERROR: "🐞",
     FeedbackKind.IDEA: "💡",
@@ -184,6 +203,8 @@ class TelegramViews:
         )
 
     def catalog_list(self, user: User, state: CatalogState, page: CatalogPage) -> Screen:
+        if state.filters.scope is CatalogScope.PROGRAMS:
+            return self._programs_list(user, state, page)
         locale = user.locale
         filters = state.filters
         lines = [
@@ -196,33 +217,9 @@ class TelegramViews:
         if not page.items:
             lines.extend(("", self._escape(self._text(locale, "events.empty"))))
         else:
-            for index, event in enumerate(page.items, start=1):
-                lines.append(
-                    f"\n<b>{index}.</b> {self._escape(self._short(event.title, _TITLE_LIMIT))}\n"
-                    f"📅 {self._escape(self._format_date(event.starts_at))} · "
-                    f"{self._escape(self._format_name(locale, event.event_format))}"
-                )
+            lines.extend(self._list_items(locale, page))
 
-        rows: list[tuple[InlineKeyboardButton, ...]] = [
-            (
-                self._callback_button(
-                    f"{index}. {self._short(event.title, _BUTTON_TEXT_LIMIT)}",
-                    EventCallback(
-                        event_id=event.id,
-                        action=EventAction.CARD,
-                        list_page=page.page,
-                    ),
-                ),
-            )
-            for index, event in enumerate(page.items, start=1)
-        ]
-        pagination = self._pagination_row(
-            page.page,
-            page.pages,
-            lambda number: CatalogPageCallback(page=number),
-        )
-        if pagination:
-            rows.append(pagination)
+        rows = self._list_rows(page)
         if not page.items and self._filters_narrowed(filters):
             rows.append(
                 (
@@ -262,6 +259,101 @@ class TelegramViews:
         if user.menu_images_enabled and filters.category is not None:
             image = self._assets.category(locale, filters.category)
         return Screen(text="\n".join(lines), keyboard=self._keyboard(rows), image=image)
+
+    def _programs_list(self, user: User, state: CatalogState, page: CatalogPage) -> Screen:
+        locale = user.locale
+        filters = state.filters
+        kind_name = (
+            self._text(locale, _PROGRAM_KIND_KEYS[filters.program_kind])
+            if filters.program_kind is not None
+            else self._text(locale, "programs.all_kinds")
+        )
+        lines = [
+            f"<b>🚀 {self._escape(self._text(locale, 'programs.title'))}</b> · "
+            f"{self._escape(self._section_title(locale, filters.section))} · "
+            f"{self._escape(kind_name)}",
+            self._escape(self._text(locale, "programs.hint")),
+        ]
+        if page.stale:
+            lines.extend(("", f"⚠️ {self._escape(self._text(locale, 'common.stale_data'))}"))
+        if not page.items:
+            lines.extend(("", self._escape(self._text(locale, "programs.empty"))))
+        else:
+            lines.extend(self._list_items(locale, page))
+        rows = self._list_rows(page)
+        kinds = [
+            self._callback_button(
+                self._selected(
+                    self._text(locale, "programs.all_kinds"), filters.program_kind is None
+                ),
+                ProgramKindAllCallback(),
+            ),
+            *(
+                self._callback_button(
+                    self._selected(
+                        f"{KIND_ICONS[kind]} {self._text(locale, _PROGRAM_KIND_KEYS[kind])}",
+                        filters.program_kind is kind,
+                    ),
+                    ProgramKindCallback(kind=kind),
+                )
+                for kind in PROGRAM_KINDS
+            ),
+        ]
+        rows.extend((tuple(kinds[:2]), tuple(kinds[2:])))
+        other_section = (
+            CatalogSection.ARCHIVE
+            if filters.section is CatalogSection.UPCOMING
+            else CatalogSection.UPCOMING
+        )
+        rows.append(
+            (
+                self._callback_button(
+                    self._section_title(locale, other_section),
+                    CatalogSectionCallback(section=other_section),
+                ),
+                self._menu_button(locale),
+            )
+        )
+        return Screen(text="\n".join(lines), keyboard=self._keyboard(rows))
+
+    def _list_items(self, locale: Locale, page: CatalogPage) -> list[str]:
+        items: list[str] = []
+        for index, event in enumerate(page.items, start=1):
+            kind = event_kind(event.event_type)
+            badge = (
+                f"{KIND_ICONS[kind]} {self._escape(self._text(locale, f'kinds.{kind.value}'))} · "
+                if kind is not None
+                else ""
+            )
+            items.append(
+                f"\n<b>{index}.</b> {self._escape(self._short(event.title, _TITLE_LIMIT))}\n"
+                f"{badge}📅 {self._escape(self._format_date(event.starts_at))} · "
+                f"{self._escape(self._format_name(locale, event.event_format))}"
+            )
+        return items
+
+    def _list_rows(self, page: CatalogPage) -> list[tuple[InlineKeyboardButton, ...]]:
+        rows: list[tuple[InlineKeyboardButton, ...]] = [
+            (
+                self._callback_button(
+                    f"{index}. {self._short(event.title, _BUTTON_TEXT_LIMIT)}",
+                    EventCallback(
+                        event_id=event.id,
+                        action=EventAction.CARD,
+                        list_page=page.page,
+                    ),
+                ),
+            )
+            for index, event in enumerate(page.items, start=1)
+        ]
+        pagination = self._pagination_row(
+            page.page,
+            page.pages,
+            lambda number: CatalogPageCallback(page=number),
+        )
+        if pagination:
+            rows.append(pagination)
+        return rows
 
     def filters(self, user: User, state: CatalogState) -> Screen:
         locale = user.locale
@@ -358,23 +450,46 @@ class TelegramViews:
         following: tuple[int, int] | None,
     ) -> Screen:
         locale = user.locale
+        kind = event_kind(event.event_type)
+        program = is_program(event.event_type)
         categories = ", ".join(
             self._text(locale, f"categories.{category.value}") for category in event.categories
-        ) or self._text(locale, "common.unavailable")
+        )
         language_names = ", ".join(
             self._language_name(locale, language) for language in event.event_languages
-        ) or self._text(locale, "common.unavailable")
-        lines = [
-            f"<b>{self._escape(self._short(event.title, _TITLE_LIMIT))}</b>",
-            "",
-            self._field(locale, "events.date", self._format_date(event.starts_at), "📅"),
-            self._field(
-                locale, "events.format", self._format_name(locale, event.event_format), "💻"
-            ),
-            self._field(locale, "events.address", event.address, "📍"),
-            self._field(locale, "events.language", language_names, "🗣"),
-            self._field(locale, "events.categories", categories, "🏷"),
-        ]
+        )
+        lines = [f"<b>{self._escape(self._short(event.title, _TITLE_LIMIT))}</b>", ""]
+        if kind is not None:
+            lines.append(
+                self._field(
+                    locale,
+                    "events.kind",
+                    self._text(locale, f"kinds.{kind.value}"),
+                    KIND_ICONS[kind],
+                )
+            )
+        lines.extend(
+            (
+                self._field(
+                    locale,
+                    "events.start" if program else "events.date",
+                    self._format_date(event.starts_at),
+                    "📅",
+                ),
+                self._field(
+                    locale, "events.format", self._format_name(locale, event.event_format), "💻"
+                ),
+            )
+        )
+        # Programs and neconf/hackathon records leave these empty at the source.
+        optional = (
+            ("events.address", event.address, "📍"),
+            ("events.language", language_names, "🗣"),
+            ("events.categories", None if program else categories, "🏷"),
+        )
+        for key, value, icon in optional:
+            if value or kind is None:
+                lines.append(self._field(locale, key, value, icon))
         if event.translation_source is TranslationSource.MACHINE:
             lines.extend(
                 ("", f"🤖 {self._escape(self._text(locale, 'events.machine_translation'))}")
@@ -391,7 +506,7 @@ class TelegramViews:
                 ),
             )
         ]
-        external = self._external_button(locale, state.filters.section, event)
+        external = self._external_button(locale, state.filters.section, event, program=program)
         if external is not None:
             rows.append((external,))
         navigation: list[InlineKeyboardButton] = []
@@ -531,6 +646,11 @@ class TelegramViews:
                 for category in summary.categories
             )
         else:
+            body = ""
+        if summary.programs:
+            programs_line = f"• 🚀 {self._escape(self._text(locale, 'subscriptions.programs'))}"
+            body = f"{body}\n{programs_line}" if body else programs_line
+        if not body:
             body = self._escape(self._text(locale, "subscriptions.none"))
         selected = set(summary.categories)
         rows: list[tuple[InlineKeyboardButton, ...]] = [
@@ -556,11 +676,22 @@ class TelegramViews:
             )
             for category in CategorySlug
         )
+        rows.append(
+            (
+                self._callback_button(
+                    self._selected(
+                        f"🚀 {self._text(locale, 'subscriptions.programs')}", summary.programs
+                    ),
+                    SubscriptionProgramsCallback(),
+                ),
+            )
+        )
         rows.append((self._menu_button(locale),))
         return Screen(
             text=(
                 f"<b>{self._escape(self._text(locale, 'subscriptions.title'))}</b>\n"
-                f"{self._escape(self._text(locale, 'subscriptions.hint'))}\n\n"
+                f"{self._escape(self._text(locale, 'subscriptions.hint'))}\n"
+                f"{self._escape(self._text(locale, 'subscriptions.programs_hint'))}\n\n"
                 f"<b>{self._escape(self._text(locale, 'subscriptions.current'))}:</b>\n{body}"
             ),
             keyboard=self._keyboard(rows),
@@ -826,11 +957,16 @@ class TelegramViews:
         )
 
     def _external_button(
-        self, locale: Locale, section: CatalogSection, event: EventDetails
+        self,
+        locale: Locale,
+        section: CatalogSection,
+        event: EventDetails,
+        *,
+        program: bool = False,
     ) -> InlineKeyboardButton | None:
         if section is CatalogSection.UPCOMING:
             url = registration_link(event.registration_url, event.details_url)
-            key, icon = "events.registration", "📝"
+            key, icon = ("programs.apply" if program else "events.registration"), "📝"
             if url is None:
                 # The source closes registration early for streamed events and
                 # publishes only the broadcast link.

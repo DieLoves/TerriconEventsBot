@@ -3,10 +3,11 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
@@ -16,12 +17,14 @@ from terricon_events_bot.domain.catalog import (
     CatalogFilter,
     CatalogPage,
     CatalogPeriod,
+    CatalogScope,
     CatalogSection,
     CatalogState,
     EventDetails,
     EventSummary,
 )
 from terricon_events_bot.domain.enums import CategorySlug, EventState, Locale
+from terricon_events_bot.domain.event_kinds import PROGRAM_KINDS, source_types
 from terricon_events_bot.infrastructure.models import (
     Event,
     EventCategory,
@@ -105,6 +108,7 @@ class CatalogQuery:
                 event_format=event.event_format,
                 categories=categories[event.id],
                 translation_source=(preferred_row or fallback_row).translation_source,
+                event_type=event.event_type,
             )
             for event, preferred_row, fallback_row in rows
         )
@@ -171,6 +175,7 @@ class CatalogQuery:
             categories=categories[event.id],
             locale=localization.locale,
             translation_source=localization.translation_source,
+            event_type=event.event_type,
         )
 
     async def adjacent_ids(
@@ -240,6 +245,17 @@ class CatalogQuery:
                     Event.starts_at >= self._day_start(self._subtract_months(today, 3))
                 )
 
+        program_types = source_types(*PROGRAM_KINDS)
+        if filters.scope is CatalogScope.PROGRAMS:
+            kinds = (filters.program_kind,) if filters.program_kind is not None else PROGRAM_KINDS
+            conditions.append(Event.event_type.in_(source_types(*kinds)))
+            conditions.append(
+                exists(
+                    select(EventLocalization.event_id).where(EventLocalization.event_id == Event.id)
+                )
+            )
+            return tuple(conditions)
+        conditions.append(or_(Event.event_type.is_(None), Event.event_type.not_in(program_types)))
         if filters.category is not None:
             conditions.append(
                 exists(
@@ -296,8 +312,15 @@ class CatalogQuery:
 
 
 class CatalogStateStore:
+    """Per-user catalog state of the active menu section.
+
+    The other section's state is parked in the same row, so switching between
+    «Мероприятия» and «Программы» keeps the filters of both.
+    """
+
     _SCOPE = "catalog"
     _STATE = "filters"
+    _PARKED = "parked"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -309,23 +332,62 @@ class CatalogStateStore:
             row = await session.get(FsmState, (user_id, self._SCOPE))
         if row is None:
             return CatalogState(CatalogFilter.default(default_section))
-        try:
-            return CatalogState.from_data(row.data)
-        except (KeyError, TypeError, ValueError):
-            return CatalogState(CatalogFilter.default(default_section))
+        return self._parse(row.data, CatalogScope.EVENTS)
+
+    async def switch(self, user_id: int, scope: CatalogScope) -> CatalogState:
+        """Make ``scope`` active (page 1) and park the state it replaces."""
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = await session.get(FsmState, (user_id, self._SCOPE), with_for_update=True)
+                data = row.data if row is not None else {}
+                active = self._parse(data, CatalogScope.EVENTS)
+                parked_data = data.get(self._PARKED) if isinstance(data, dict) else None
+                if active.filters.scope is scope:
+                    target, parked = active, parked_data
+                else:
+                    target = self._parse(parked_data, scope)
+                    if target.filters.scope is not scope:
+                        target = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING, scope))
+                    parked = active.to_data()
+                target = replace(target, page=1)
+                await self._upsert(session, user_id, target, parked)
+        return target
 
     async def save(self, user_id: int, state: CatalogState) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = await session.get(FsmState, (user_id, self._SCOPE), with_for_update=True)
+                parked = (
+                    row.data.get(self._PARKED)
+                    if row is not None and isinstance(row.data, dict)
+                    else None
+                )
+                await self._upsert(session, user_id, state, parked)
+
+    async def _upsert(
+        self, session: AsyncSession, user_id: int, state: CatalogState, parked: object
+    ) -> None:
+        data: dict[str, object] = state.to_data()
+        if isinstance(parked, dict):
+            data[self._PARKED] = {
+                key: value for key, value in parked.items() if key != self._PARKED
+            }
         statement = pg_insert(FsmState).values(
             user_id=user_id,
             scope=self._SCOPE,
             state=self._STATE,
-            data=state.to_data(),
+            data=data,
         )
-        async with self._session_factory() as session:
-            async with session.begin():
-                await session.execute(
-                    statement.on_conflict_do_update(
-                        index_elements=[FsmState.user_id, FsmState.scope],
-                        set_={"state": self._STATE, "data": state.to_data()},
-                    )
-                )
+        await session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[FsmState.user_id, FsmState.scope],
+                set_={"state": self._STATE, "data": data},
+            )
+        )
+
+    @staticmethod
+    def _parse(data: object, scope: CatalogScope) -> CatalogState:
+        try:
+            return CatalogState.from_data(data)
+        except (KeyError, TypeError, ValueError):
+            return CatalogState(CatalogFilter.default(CatalogSection.UPCOMING, scope))

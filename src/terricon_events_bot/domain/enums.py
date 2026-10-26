@@ -89,6 +89,11 @@ class SyncRunStatus(StrEnum):
     FAILED = "failed"
 
 
+class SyncSource(StrEnum):
+    STAGE = "stage"
+    LEGACY = "legacy"
+
+
 class SyncEndpointStatus(StrEnum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"

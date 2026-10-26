@@ -32,6 +32,8 @@ def test_catalog_state_round_trip_uses_only_stable_codes() -> None:
         "category": "ai_data",
         "format": "hybrid",
         "language": "en",
+        "scope": "e",
+        "kind": None,
         "page": 3,
     }
     assert CatalogState.from_data(data) == state

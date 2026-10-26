@@ -22,6 +22,7 @@ from terricon_events_bot.domain.enums import (
     Locale,
     NotificationType,
 )
+from terricon_events_bot.domain.event_kinds import KIND_ICONS, event_kind, is_program
 from terricon_events_bot.infrastructure.models import (
     Broadcast,
     BroadcastDelivery,
@@ -113,6 +114,7 @@ class DigestEntry:
     starts_at: datetime
     changed_fields: tuple[str, ...]
     url: str | None = None
+    event_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +192,9 @@ class DigestRenderer:
 
     def _entry_text(self, entry: DigestEntry, locale: Locale) -> str:
         title = " ".join(entry.title.split())[:_TITLE_LIMIT]
+        kind = event_kind(entry.event_type)
+        if kind is not None:
+            title = f"{KIND_ICONS[kind]} {self._text(locale, f'kinds.{kind.value}')}: {title}"
         date = entry.starts_at.astimezone(self._timezone).strftime("%d.%m.%Y %H:%M")
         lines = [f"• {title}", f"📅 {date}"]
         if entry.notification_type is NotificationType.CANCELLATION:
@@ -350,6 +355,24 @@ class OutboxService:
         )
 
     async def _recipient_ids(self, session: AsyncSession, change: DomainChange) -> tuple[int, ...]:
+        event_type = await session.scalar(
+            select(Event.event_type).where(Event.id == change.event_id)
+        )
+        if is_program(event_type):
+            # Programs have their own opt-in, independent of event categories.
+            return tuple(
+                (
+                    await session.scalars(
+                        select(User.id)
+                        .where(
+                            User.is_active.is_(True),
+                            User.access_granted.is_(True),
+                            User.program_notifications.is_(True),
+                        )
+                        .order_by(User.id)
+                    )
+                ).all()
+            )
         category_values = set(change.old_categories) | set(change.new_categories)
         categories = [
             category
@@ -471,6 +494,7 @@ class OutboxService:
                     Event.starts_at,
                     Event.registration_url,
                     Event.recording_url,
+                    Event.event_type,
                 )
                 .join(DomainChange, DomainChange.id == NotificationDelivery.domain_change_id)
                 .join(Event, Event.id == NotificationDelivery.event_id)
@@ -523,6 +547,7 @@ class OutboxService:
                         registration_link(selected.registration_url, details_url)
                         or normalize_http_url(selected.recording_url or "")
                     ),
+                    event_type=selected.event_type,
                 )
             )
         return tuple(

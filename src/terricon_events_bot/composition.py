@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -102,11 +103,17 @@ def build_foundation(settings: Settings, project_root: Path) -> Foundation:
     terricon_client = TerriconClient(
         str(settings.base_url),
         http_client,
+        stage_url=settings.resolved_stage_url,
         max_retries=settings.sync_max_retries,
     )
     job_coordinator = AdvisoryJobCoordinator(session_factory)
     sync_service = LockedSyncRunner(
-        SyncService(session_factory, terricon_client),
+        SyncService(
+            session_factory,
+            terricon_client,
+            timezone=settings.timezone,
+            fallback_alert_after=timedelta(hours=settings.source_fallback_alert_hours),
+        ),
         job_coordinator,
     )
     groq_client = AsyncGroq(

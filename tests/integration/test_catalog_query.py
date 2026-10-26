@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -12,6 +13,7 @@ from terricon_events_bot.application.catalog import CatalogQuery, CatalogStateSt
 from terricon_events_bot.domain.catalog import (
     CatalogFilter,
     CatalogPeriod,
+    CatalogScope,
     CatalogSection,
     CatalogState,
     EventLanguage,
@@ -24,6 +26,7 @@ from terricon_events_bot.domain.enums import (
     SourceTheme,
     TranslationSource,
 )
+from terricon_events_bot.domain.event_kinds import EventKind
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
 from terricon_events_bot.infrastructure.models import (
     Event,
@@ -74,10 +77,12 @@ async def add_event(
     available: bool = True,
     state: EventState = EventState.ACTIVE,
     only_kz: bool = False,
+    event_type: str | None = None,
 ) -> int:
     event = Event(
         source_id=source_id,
         source_theme=SourceTheme.IT,
+        event_type=event_type,
         starts_at=starts_at,
         event_format=event_format,
         event_languages=list(languages),
@@ -263,3 +268,85 @@ async def test_catalog_state_is_durable_and_corruption_falls_back_safely(
 
     recovered = await store.load(user_id)
     assert recovered == CatalogState(CatalogFilter.default(CatalogSection.UPCOMING))
+
+
+@pytest.mark.asyncio
+async def test_programs_have_their_own_section_and_dated_kinds_stay_in_events(
+    catalog_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = catalog_database
+    upcoming = NOW + timedelta(days=2)
+    async with session_factory() as session:
+        async with session.begin():
+            lecture = await add_event(session, 1, upcoming, title="Lecture", event_type="lecture")
+            neconf = await add_event(session, 2, upcoming, title="Neconf", event_type="neconf")
+            legacy = await add_event(session, 3, upcoming, title="Untyped")
+            accelerator = await add_event(
+                session, 4, upcoming, title="Accelerator", event_type="accelerator"
+            )
+            course = await add_event(session, 5, upcoming, title="Course", event_type="oc")
+            await add_event(
+                session, 6, NOW - timedelta(days=40), title="Old incubator", event_type="incubator"
+            )
+    query = CatalogQuery(session_factory, timezone=ALMATY, page_size=10)
+
+    async def ids(filters: CatalogFilter) -> set[int]:
+        page = await query.list(filters, Locale.RU, 1, now=NOW)
+        return {item.id for item in page.items}
+
+    events = CatalogFilter.default(CatalogSection.UPCOMING)
+    programs = CatalogFilter.default(CatalogSection.UPCOMING, CatalogScope.PROGRAMS)
+    archive = CatalogFilter.default(CatalogSection.ARCHIVE, CatalogScope.PROGRAMS)
+
+    assert await ids(events) == {lecture, neconf, legacy}
+    assert await ids(programs) == {accelerator, course}
+    courses = replace(programs, program_kind=EventKind.COURSE)
+    assert await ids(courses) == {course}
+    assert len(await ids(archive)) == 1
+    details = await query.get(neconf, Locale.RU)
+    assert details is not None and details.event_type == "neconf"
+
+
+@pytest.mark.asyncio
+async def test_switching_sections_parks_and_restores_each_state(
+    catalog_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = catalog_database
+    async with session_factory() as session:
+        async with session.begin():
+            user = User(telegram_id=54321)
+            session.add(user)
+            await session.flush()
+            user_id = user.id
+    store = CatalogStateStore(session_factory)
+    events_state = CatalogState(
+        CatalogFilter(
+            CatalogSection.ARCHIVE,
+            CatalogPeriod.MONTHS_3,
+            category=CategorySlug.AI_DATA,
+            language=EventLanguage.EN,
+        ),
+        page=3,
+    )
+    await store.save(user_id, events_state)
+
+    programs = await store.switch(user_id, CatalogScope.PROGRAMS)
+    assert programs == CatalogState(
+        CatalogFilter.default(CatalogSection.UPCOMING, CatalogScope.PROGRAMS)
+    )
+    chosen = CatalogState(
+        CatalogFilter(
+            CatalogSection.ARCHIVE,
+            CatalogPeriod.ALL,
+            scope=CatalogScope.PROGRAMS,
+            program_kind=EventKind.ACCELERATOR,
+        ),
+        page=2,
+    )
+    await store.save(user_id, chosen)
+    assert await store.load(user_id) == chosen
+
+    restored = await store.switch(user_id, CatalogScope.EVENTS)
+    assert restored == CatalogState(events_state.filters, page=1)
+    back = await store.switch(user_id, CatalogScope.PROGRAMS)
+    assert back == CatalogState(chosen.filters, page=1)

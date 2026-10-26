@@ -146,6 +146,8 @@ async def add_event(
     source_id: int,
     title: str,
     starts_at: datetime,
+    *,
+    event_type: str | None = None,
 ) -> int:
     async with session_factory() as session:
         async with session.begin():
@@ -153,6 +155,7 @@ async def add_event(
                 source_id=source_id,
                 source_theme=SourceTheme.IT,
                 starts_at=starts_at,
+                event_type=event_type,
                 revision=1,
             )
             session.add(event)
@@ -825,3 +828,62 @@ async def test_digest_registration_link_opens_the_site_form_when_anchored(
     text_value = outbox.payload["chunks"][0]["text"]
     assert "🔗 https://terricon.kz/ru/it#aleksanova28.10" in text_value
     assert "share.kz" not in text_value
+
+
+@pytest.mark.asyncio
+async def test_programs_reach_only_program_subscribers_with_a_kind_badge(
+    delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = delivery_database
+    await add_user(session_factory, 4200001, SubscriptionMode.ALL)
+    category_user = await add_user(
+        session_factory, 4200002, SubscriptionMode.CATEGORIES, (CategorySlug.AI_DATA,)
+    )
+    program_user = await add_user(session_factory, 4200003, SubscriptionMode.NONE)
+    await SubscriptionService(session_factory).toggle_programs(program_user)
+    both_user = await add_user(session_factory, 4200004, SubscriptionMode.ALL)
+    await SubscriptionService(session_factory).toggle_programs(both_user)
+    program_id = await add_event(
+        session_factory,
+        5200001,
+        "Accelerator",
+        datetime(2030, 1, 5, tzinfo=UTC),
+        event_type="accelerator",
+    )
+    neconf_id = await add_event(
+        session_factory,
+        5200002,
+        "Neconf",
+        datetime(2030, 1, 5, tzinfo=UTC),
+        event_type="neconf",
+    )
+    for event_id in (program_id, neconf_id):
+        await add_change(
+            session_factory,
+            event_id,
+            1,
+            NotificationType.NEW_EVENT,
+            new_categories=(CategorySlug.AI_DATA,),
+            change_data={"new": True},
+        )
+    service = outbox_service(session_factory, FrozenClock(datetime(2030, 1, 1, 7, tzinfo=UTC)))
+
+    await service.materialize()
+
+    async with session_factory() as session:
+        recipients = {
+            (row.event_id, row.user_id)
+            for row in (await session.scalars(select(NotificationDelivery))).all()
+        }
+        outbox = await session.scalar(
+            select(NotificationOutbox).where(NotificationOutbox.user_id == program_user)
+        )
+
+    assert {user for event, user in recipients if event == program_id} == {
+        program_user,
+        both_user,
+    }
+    assert category_user in {user for event, user in recipients if event == neconf_id}
+    assert program_user not in {user for event, user in recipients if event == neconf_id}
+    assert outbox is not None
+    assert "🚀 Акселератор: Accelerator" in outbox.payload["chunks"][0]["text"]

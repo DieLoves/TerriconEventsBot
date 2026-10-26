@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -10,6 +11,7 @@ from terricon_events_bot.domain.catalog import (
     CatalogFilter,
     CatalogPage,
     CatalogPeriod,
+    CatalogScope,
     CatalogSection,
     CatalogState,
     EventDetails,
@@ -22,6 +24,7 @@ from terricon_events_bot.domain.enums import (
     Locale,
     TranslationSource,
 )
+from terricon_events_bot.domain.event_kinds import EventKind
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.localization import LocalizationCatalog
@@ -123,7 +126,8 @@ def test_subscription_view_exposes_all_categories_and_selection(tmp_path: Path) 
     )
 
     buttons = [button.text for row in screen.keyboard.inline_keyboard for button in row]
-    assert len(buttons) == len(CategorySlug) + 2
+    # all-events, categories, programs toggle and the menu button.
+    assert len(buttons) == len(CategorySlug) + 3
     assert "✓ AI и Data" in buttons
     assert "✓ Другое" in buttons
     assert "Все новые мероприятия" in buttons  # noqa: RUF001
@@ -331,3 +335,99 @@ def test_upcoming_registration_opens_the_site_form_for_the_event(tmp_path: Path)
         if button.url is not None
     ]
     assert links == [("📝 Регистрация", site)]
+
+
+def test_main_menu_offers_programs_next_to_events(tmp_path: Path) -> None:
+    screen = views(tmp_path).main_menu(user(images=False))
+
+    assert button_rows(screen)[0] == ["🗓 Мероприятия", "🚀 Программы"]
+
+
+def test_programs_list_filters_by_kind_and_badges_items(tmp_path: Path) -> None:
+    state = CatalogState(
+        CatalogFilter(
+            CatalogSection.UPCOMING,
+            CatalogPeriod.ALL,
+            scope=CatalogScope.PROGRAMS,
+            program_kind=EventKind.COURSE,
+        )
+    )
+    item = replace(summary(7), title="Python", event_type="oc")
+    listing = CatalogPage(items=(item,), page=1, pages=1, total=1, stale=False)
+
+    screen = views(tmp_path).catalog_list(user(), state, listing)
+
+    assert screen.text.startswith("<b>🚀 Программы</b> · 🗓 Актуальные · Курсы")
+    assert "🎓 Курс · 📅" in screen.text  # noqa: RUF001
+    assert button_rows(screen) == [
+        ["1. Python"],
+        ["Все виды", "🚀 Акселераторы"],  # noqa: RUF001
+        ["🌱 Инкубаторы", "✓ 🎓 Курсы"],
+        ["📦 Архив", "🏠 В меню"],  # noqa: RUF001
+    ]
+
+
+def test_events_list_badges_neconf(tmp_path: Path) -> None:
+    state = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING))
+    item = replace(summary(3), event_type="neconf")
+    listing = CatalogPage(items=(item,), page=1, pages=1, total=1, stale=False)
+
+    screen = views(tmp_path).catalog_list(user(), state, listing)
+
+    assert "🎤 Неконференция · 📅" in screen.text
+
+
+def test_program_card_shows_start_and_application_without_empty_fields(tmp_path: Path) -> None:
+    state = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING, CatalogScope.PROGRAMS))
+    program = event(
+        event_type="accelerator",
+        address=None,
+        event_languages=(),
+        details_url="https://terricon.kz/kz/accelerator#form",
+        registration_url="https://terricon.kz/ru/accelerator#form",
+    )
+
+    screen = views(tmp_path).event_card(
+        user(posters=False), state, program, page=1, previous=None, following=None
+    )
+
+    assert "🚀 <b>Вид:</b> Акселератор" in screen.text
+    assert "<b>Старт:</b>" in screen.text
+    assert "Адрес" not in screen.text and "Язык" not in screen.text
+    assert "Категории" not in screen.text
+    links = [
+        (button.text, button.url)
+        for row in screen.keyboard.inline_keyboard
+        for button in row
+        if button.url
+    ]
+    assert links == [("📝 Подать заявку", "https://terricon.kz/kz/accelerator#form")]
+
+
+def test_neconf_card_keeps_registration_label_and_categories(tmp_path: Path) -> None:
+    state = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING))
+    neconf = event(
+        event_type="neconf",
+        address=None,
+        event_languages=(),
+        details_url="https://terricon.kz/ru/neconf#form",
+        registration_url="https://terricon.kz/ru/neconf#form",
+    )
+
+    screen = views(tmp_path).event_card(
+        user(posters=False), state, neconf, page=1, previous=None, following=None
+    )
+
+    assert "<b>Дата:</b>" in screen.text and "Категории" in screen.text
+    assert "Адрес" not in screen.text
+    assert any(
+        button.text == "📝 Регистрация" for row in screen.keyboard.inline_keyboard for button in row
+    )
+
+
+def test_subscription_view_toggles_programs(tmp_path: Path) -> None:
+    screen = views(tmp_path).subscriptions(user(), SubscriptionSummary(False, (), programs=True))
+
+    assert "• 🚀 Новые наборы в программы" in screen.text
+    assert "Подписки не выбраны" not in screen.text
+    assert ["✓ 🚀 Новые наборы в программы"] in button_rows(screen)

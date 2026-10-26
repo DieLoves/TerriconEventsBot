@@ -4,6 +4,7 @@ from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urljoin
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram.utils.token import TokenValidationError, validate_token
@@ -44,6 +45,8 @@ class Settings(BaseSettings):
     )
 
     base_url: HttpUrl = Field(validation_alias="BASE_URL")
+    # eventsByStage; by default the sibling of BASE_URL (…/getAllEvents → …/eventsByStage).
+    stage_url: HttpUrl | None = Field(default=None, validation_alias="STAGE_URL")
     telegram_bot_token: SecretStr = Field(
         min_length=1,
         validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "BOT_TOKEN"),
@@ -103,6 +106,9 @@ class Settings(BaseSettings):
         default=6, ge=1, le=24 * 7, validation_alias="SYNC_INTERVAL_HOURS"
     )
     sync_max_retries: int = Field(default=3, ge=0, le=10, validation_alias="SYNC_MAX_RETRIES")
+    source_fallback_alert_hours: int = Field(
+        default=24, ge=1, le=24 * 30, validation_alias="SOURCE_FALLBACK_ALERT_HOURS"
+    )
     events_page_size: int = Field(default=5, ge=1, le=20, validation_alias="EVENTS_PAGE_SIZE")
     quiet_hours_start: time = Field(default=time(22), validation_alias="QUIET_HOURS_START")
     quiet_hours_end: time = Field(default=time(9), validation_alias="QUIET_HOURS_END")
@@ -190,6 +196,12 @@ class Settings(BaseSettings):
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.app_timezone)
+
+    @property
+    def resolved_stage_url(self) -> str:
+        if self.stage_url is not None:
+            return str(self.stage_url)
+        return urljoin(str(self.base_url), "eventsByStage")
 
     @property
     def resolved_admin_chat_id(self) -> int:

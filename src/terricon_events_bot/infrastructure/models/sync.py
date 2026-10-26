@@ -25,6 +25,7 @@ from terricon_events_bot.domain.enums import (
     SourceTheme,
     SyncEndpointStatus,
     SyncRunStatus,
+    SyncSource,
     SyncTrigger,
 )
 from terricon_events_bot.infrastructure.database import Base
@@ -39,6 +40,7 @@ class SyncState(Base):
     baseline_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_full_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fallback_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
@@ -57,6 +59,7 @@ class SyncRun(Base):
     trigger: Mapped[SyncTrigger] = mapped_column(
         enum_type(SyncTrigger, "sync_trigger"), nullable=False
     )
+    source: Mapped[SyncSource | None] = mapped_column(enum_type(SyncSource, "sync_source"))
     status: Mapped[SyncRunStatus] = mapped_column(
         enum_type(SyncRunStatus, "sync_run_status"),
         nullable=False,
@@ -87,14 +90,21 @@ class SyncRun(Base):
 class SyncEndpointState(Base):
     __tablename__ = "sync_endpoint_states"
     __table_args__ = (
+        UniqueConstraint("source", "locale", "source_theme", postgresql_nulls_not_distinct=True),
         CheckConstraint("consecutive_failures >= 0", name="failures_nonnegative"),
+        CheckConstraint("(source = 'stage') = (source_theme IS NULL)", name="theme_matches_source"),
         Index("ix_sync_endpoint_states_last_success_at", "last_success_at"),
     )
 
-    locale: Mapped[Locale] = mapped_column(enum_type(Locale, "locale"), primary_key=True)
-    source_theme: Mapped[SourceTheme] = mapped_column(
-        enum_type(SourceTheme, "source_theme"), primary_key=True
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    source: Mapped[SyncSource] = mapped_column(
+        enum_type(SyncSource, "sync_source"),
+        nullable=False,
+        default=SyncSource.LEGACY,
+        server_default="legacy",
     )
+    locale: Mapped[Locale] = mapped_column(enum_type(Locale, "locale"), nullable=False)
+    source_theme: Mapped[SourceTheme | None] = mapped_column(enum_type(SourceTheme, "source_theme"))
     last_status: Mapped[SyncEndpointStatus | None] = mapped_column(
         enum_type(SyncEndpointStatus, "sync_endpoint_status")
     )
@@ -112,19 +122,30 @@ class SyncEndpointState(Base):
 class SyncRunEndpoint(Base):
     __tablename__ = "sync_run_endpoints"
     __table_args__ = (
-        UniqueConstraint("sync_run_id", "locale", "source_theme"),
+        UniqueConstraint(
+            "sync_run_id",
+            "source",
+            "locale",
+            "source_theme",
+            postgresql_nulls_not_distinct=True,
+        ),
         CheckConstraint("attempts >= 0", name="attempts_nonnegative"),
         CheckConstraint("records_seen >= 0", name="records_seen_nonnegative"),
+        CheckConstraint("(source = 'stage') = (source_theme IS NULL)", name="theme_matches_source"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     sync_run_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("sync_runs.id", ondelete="CASCADE"), nullable=False
     )
-    locale: Mapped[Locale] = mapped_column(enum_type(Locale, "locale"), nullable=False)
-    source_theme: Mapped[SourceTheme] = mapped_column(
-        enum_type(SourceTheme, "source_theme"), nullable=False
+    source: Mapped[SyncSource] = mapped_column(
+        enum_type(SyncSource, "sync_source"),
+        nullable=False,
+        default=SyncSource.LEGACY,
+        server_default="legacy",
     )
+    locale: Mapped[Locale] = mapped_column(enum_type(Locale, "locale"), nullable=False)
+    source_theme: Mapped[SourceTheme | None] = mapped_column(enum_type(SourceTheme, "source_theme"))
     status: Mapped[SyncEndpointStatus] = mapped_column(
         enum_type(SyncEndpointStatus, "sync_endpoint_status"),
         nullable=False,

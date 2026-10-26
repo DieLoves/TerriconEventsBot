@@ -64,6 +64,9 @@ class User(Base):
     access_granted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    program_notifications: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     feedback_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     feedback_blocked_by: Mapped[int | None] = mapped_column(BigInteger)
     current_menu_chat_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -117,6 +120,7 @@ class Event(Base):
         ARRAY(Text), nullable=False, default=list, server_default=text("'{}'::text[]")
     )
     address: Mapped[str | None] = mapped_column(Text)
+    event_type: Mapped[str | None] = mapped_column(String(64))
     registration_url: Mapped[str | None] = mapped_column(Text)
     recording_url: Mapped[str | None] = mapped_column(Text)
     poster_url: Mapped[str | None] = mapped_column(Text)

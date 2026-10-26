@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from terricon_events_bot.application.sync import SyncService
@@ -19,6 +19,7 @@ from terricon_events_bot.domain.enums import (
     NotificationType,
     SourceTheme,
     SyncRunStatus,
+    SyncSource,
     SyncTrigger,
     TranslationSource,
 )
@@ -31,7 +32,9 @@ from terricon_events_bot.infrastructure.models import (
     EventCategory,
     EventClassification,
     EventLocalization,
+    SyncEndpointState,
     SyncRun,
+    SyncRunEndpoint,
     SyncState,
 )
 from terricon_events_bot.infrastructure.terricon.client import (
@@ -48,11 +51,43 @@ EndpointKey = tuple[Locale, SourceTheme]
 
 
 class FakeSource:
-    def __init__(self, payloads: dict[EndpointKey, EndpointPayload]) -> None:
+    """Theme endpoints from ``payloads``; with ``stage`` eventsByStage is their union.
+
+    Without ``stage`` the primary source is unavailable, so every cycle is a fallback.
+    """
+
+    def __init__(
+        self, payloads: dict[EndpointKey, EndpointPayload], *, stage: bool = False
+    ) -> None:
         self.payloads = payloads
         self.failures: dict[EndpointKey, TerriconRequestError] = {}
+        self.stage = stage
+        self.stage_failures: dict[Locale, TerriconRequestError] = {}
+        self.stage_only: dict[Locale, tuple[SourceEvent, ...]] = {}
+        self.stage_calls = 0
+        self.legacy_calls = 0
+
+    async def fetch_stage(self, locale: Locale) -> EndpointPayload:
+        self.stage_calls += 1
+        if not self.stage:
+            raise TerriconRequestError("stage_disabled", 0)
+        failure = self.stage_failures.get(locale)
+        if failure is not None:
+            raise failure
+        themed = [self.payloads[(locale, theme)] for theme in SourceTheme]
+        extra = self.stage_only.get(locale, ())
+        return EndpointPayload(
+            events=tuple(event for payload in themed for event in payload.events) + extra,
+            observed_source_ids=frozenset(
+                source_id for payload in themed for source_id in payload.observed_source_ids
+            )
+            | {event.source_id for event in extra},
+            invalid_records=sum(payload.invalid_records for payload in themed),
+            attempts=1,
+        )
 
     async def fetch_detailed(self, locale: Locale, theme: SourceTheme) -> EndpointPayload:
+        self.legacy_calls += 1
         failure = self.failures.get((locale, theme))
         if failure is not None:
             raise failure
@@ -191,7 +226,13 @@ async def test_post_baseline_new_and_important_changes_are_idempotent(
             title=f"{original.localization.title} second",
             content_hash=("a" if locale is Locale.RU else "b") * 64,
         )
-        added = replace(original, source_id=102, localization=localization)
+        # Upcoming relative to MutableClock: past new events are stored silently.
+        added = replace(
+            original,
+            source_id=102,
+            starts_at=datetime(2030, 2, 1, 10, tzinfo=UTC),
+            localization=localization,
+        )
         replace_payload_events(
             source,
             locale,
@@ -399,7 +440,7 @@ async def test_two_complete_missing_cycles_hide_event_and_recovery_restores_it(
     sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, session_factory = sync_database
-    source = FakeSource(full_payloads())
+    source = FakeSource(full_payloads(), stage=True)
     service = SyncService(session_factory, source, clock=MutableClock())
     await service.run(SyncTrigger.STARTUP)
 
@@ -457,7 +498,7 @@ async def test_invalid_but_observed_record_cannot_make_saved_event_missing(
     sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, session_factory = sync_database
-    source = FakeSource(full_payloads())
+    source = FakeSource(full_payloads(), stage=True)
     service = SyncService(session_factory, source, clock=MutableClock())
     await service.run(SyncTrigger.STARTUP)
 
@@ -483,7 +524,7 @@ async def test_hidden_events_are_not_rewritten_by_later_complete_cycles(
     sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, session_factory = sync_database
-    source = FakeSource(full_payloads())
+    source = FakeSource(full_payloads(), stage=True)
     service = SyncService(session_factory, source, clock=MutableClock())
     await service.run(SyncTrigger.STARTUP)
     for locale in Locale:
@@ -508,7 +549,7 @@ async def test_database_rollback_leaves_a_failed_sync_run_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, session_factory = sync_database
-    source = FakeSource(full_payloads())
+    source = FakeSource(full_payloads(), stage=True)
     service = SyncService(session_factory, source, clock=MutableClock())
 
     async def fail_merge(*_args: object, **_kwargs: object) -> tuple[int, int, int]:
@@ -702,7 +743,7 @@ async def test_unannounced_event_suppresses_changes_until_active_again(
     sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, session_factory = sync_database
-    source = FakeSource(full_payloads())
+    source = FakeSource(full_payloads(), stage=True)
     service = SyncService(session_factory, source, clock=MutableClock())
     await service.run(SyncTrigger.STARTUP)
 
@@ -712,6 +753,7 @@ async def test_unannounced_event_suppresses_changes_until_active_again(
         added = replace(
             original,
             source_id=103,
+            starts_at=datetime(2030, 2, 1, 10, tzinfo=UTC),
             localization=replace(
                 original.localization,
                 title=f"{original.localization.title} new",
@@ -766,3 +808,174 @@ async def test_unannounced_event_suppresses_changes_until_active_again(
     assert classification.result_metadata["notify_new"] is False
     assert [change.notification_type for change in changes] == [NotificationType.NEW_EVENT]
     assert changes[0].new_categories == ["development_it"]
+
+
+def stage_record(locale: Locale, source_id: int) -> SourceEvent:
+    payload = json.loads((FIXTURES / f"events_by_stage_{locale.value}.json").read_text())
+    raw = next(
+        record
+        for record in (*payload["eventsNew"], *payload["eventsPreparation"])
+        if record["id"] == source_id
+    )
+    event, issues = normalize_event(TerriconEventDTO.model_validate(raw), locale, None)
+    assert not issues
+    return event
+
+
+@pytest.mark.asyncio
+async def test_stage_cycle_is_primary_and_audited_per_locale(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads(), stage=True)
+    source.stage_only = {locale: (stage_record(locale, 902),) for locale in Locale}
+    service = SyncService(session_factory, source, clock=MutableClock())
+
+    result = await service.run(SyncTrigger.STARTUP)
+
+    async with session_factory() as session:
+        run = (await session.scalars(select(SyncRun))).one()
+        endpoints = (await session.scalars(select(SyncRunEndpoint))).all()
+        states = (await session.scalars(select(SyncEndpointState))).all()
+        program = await session.scalar(select(Event).where(Event.source_id == 902))
+
+    assert result.status is SyncRunStatus.SUCCEEDED and result.baseline_completed
+    assert source.legacy_calls == 0
+    assert run.source is SyncSource.STAGE
+    assert {(row.source, row.locale, row.source_theme) for row in endpoints} == {
+        (SyncSource.STAGE, Locale.RU, None),
+        (SyncSource.STAGE, Locale.KZ, None),
+    }
+    assert len(states) == 2
+    assert program is not None and program.event_type == "accelerator"
+    assert program.source_theme is SourceTheme.BUSINESS
+
+
+@pytest.mark.asyncio
+async def test_fallback_keeps_programs_and_alerts_only_when_prolonged(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads(), stage=True)
+    source.stage_only = {locale: (stage_record(locale, 902),) for locale in Locale}
+    service = SyncService(
+        session_factory,
+        source,
+        clock=MutableClock(),
+        fallback_alert_after=timedelta(minutes=2),
+    )
+    await service.run(SyncTrigger.STARTUP)
+
+    source.stage_failures[Locale.KZ] = TerriconRequestError("timeout", 4)
+    fallback_results = [await service.run(SyncTrigger.SCHEDULED) for _ in range(3)]
+
+    async with session_factory() as session:
+        program = await session.scalar(select(Event).where(Event.source_id == 902))
+        assert program is not None
+        changes = (await session.scalars(select(DomainChange))).all()
+        state = await session.get(SyncState, 1)
+        alerts = {
+            alert.fingerprint: alert for alert in (await session.scalars(select(AdminAlert))).all()
+        }
+        sources = (await session.scalars(select(SyncRun.source).order_by(SyncRun.id))).all()
+
+    assert all(result.status is SyncRunStatus.SUCCEEDED for result in fallback_results)
+    assert sources == [SyncSource.STAGE, SyncSource.LEGACY, SyncSource.LEGACY, SyncSource.LEGACY]
+    assert program.is_available and program.missing_streak == 0
+    assert changes == []
+    assert state is not None and state.fallback_since is not None
+    assert not any(fingerprint.startswith("sync_endpoint:") for fingerprint in alerts)
+    assert alerts["sync_source_fallback"].resolved_at is None
+
+    source.stage_failures.clear()
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        state = await session.get(SyncState, 1)
+        alert = await session.scalar(
+            select(AdminAlert).where(AdminAlert.fingerprint == "sync_source_fallback")
+        )
+    assert state is not None and state.fallback_since is None
+    assert alert is not None and alert.resolved_at is not None
+
+
+@pytest.mark.asyncio
+async def test_short_fallback_does_not_alert_and_counts_no_absence(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads(), stage=True)
+    service = SyncService(session_factory, source, clock=MutableClock())
+    await service.run(SyncTrigger.STARTUP)
+
+    source.stage_failures[Locale.RU] = TerriconRequestError("http_500", 4)
+    for locale in Locale:
+        replace_payload_events(source, locale, SourceTheme.MARKETING, ())
+    await service.run(SyncTrigger.SCHEDULED)
+    await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        marketing = (
+            await session.scalars(select(Event).where(Event.source_theme == SourceTheme.MARKETING))
+        ).all()
+        alert_count = await session.scalar(select(func.count()).select_from(AdminAlert))
+
+    # getAllEvents is incomplete by design: nothing is hidden while it is used.
+    assert marketing and all(
+        event.is_available and event.missing_streak == 0 for event in marketing
+    )
+    assert alert_count == 0
+
+
+@pytest.mark.asyncio
+async def test_new_source_records_notify_only_while_upcoming(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads(), stage=True)
+    service = SyncService(session_factory, source, clock=MutableClock())
+    await service.run(SyncTrigger.STARTUP)
+
+    # Clock is 2030-01-10: neconf 901 is on 2030-01-20, partner conference 904 is past.
+    source.stage_only = {
+        locale: (stage_record(locale, 901), stage_record(locale, 904)) for locale in Locale
+    }
+    result = await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(Event.source_id, EventClassification.result_metadata)
+                .join(EventClassification, EventClassification.event_id == Event.id)
+                .where(Event.source_id.in_((901, 904)))
+            )
+        ).all()
+        change_count = await session.scalar(select(func.count()).select_from(DomainChange))
+
+    assert result.created_events == 2
+    assert {source_id: metadata["notify_new"] for source_id, metadata in rows} == {
+        901: True,
+        904: False,
+    }
+    assert change_count == 0
+
+
+@pytest.mark.asyncio
+async def test_filling_event_type_of_existing_events_is_not_a_change(
+    sync_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = sync_database
+    source = FakeSource(full_payloads(), stage=True)
+    service = SyncService(session_factory, source, clock=MutableClock())
+    await service.run(SyncTrigger.STARTUP)
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(update(Event).values(event_type=None))
+
+    result = await service.run(SyncTrigger.SCHEDULED)
+
+    async with session_factory() as session:
+        events = (await session.scalars(select(Event))).all()
+    assert result.updated_events == 0
+    assert {event.event_type for event in events} == {"lecture", "edu", "mitup"}
+    assert all(event.revision == 1 for event in events)

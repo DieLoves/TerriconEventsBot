@@ -92,7 +92,7 @@ def test_alembic_history_is_linear_and_has_expected_head() -> None:
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
     revisions = list(scripts.walk_revisions(base="base", head="heads"))
 
-    assert scripts.get_heads() == ["0011_groq_shared_quota"]
+    assert scripts.get_heads() == ["0012_hybrid_source"]
     assert [revision.revision for revision in reversed(revisions)] == [
         "0001_core",
         "0002_sync_subscriptions",
@@ -105,6 +105,7 @@ def test_alembic_history_is_linear_and_has_expected_head() -> None:
         "0009_stage7_broadcast_state",
         "0010_hardening_queue_state",
         "0011_groq_shared_quota",
+        "0012_hybrid_source",
     ]
 
 

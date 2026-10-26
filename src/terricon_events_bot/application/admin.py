@@ -15,6 +15,7 @@ from terricon_events_bot.domain.enums import (
     Locale,
     SourceTheme,
     SyncEndpointStatus,
+    SyncSource,
     TicketStatus,
 )
 from terricon_events_bot.infrastructure.models import (
@@ -28,6 +29,7 @@ from terricon_events_bot.infrastructure.models import (
     SubscriptionCategory,
     SubscriptionSettings,
     SyncEndpointState,
+    SyncRun,
     SyncState,
     User,
 )
@@ -44,8 +46,9 @@ class SystemClock:
 
 @dataclass(frozen=True, slots=True)
 class AdminEndpointStatus:
+    source: SyncSource
     locale: Locale
-    source_theme: SourceTheme
+    source_theme: SourceTheme | None
     last_status: SyncEndpointStatus | None
     consecutive_failures: int
     last_success_at: datetime | None
@@ -61,6 +64,8 @@ class AdminStatus:
     pending_classifications: int
     pending_outbox: int
     unfinished_broadcasts: int
+    source: SyncSource | None = None
+    fallback_since: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +101,7 @@ class AdminService:
             endpoint_rows = (
                 await session.scalars(
                     select(SyncEndpointState).order_by(
+                        SyncEndpointState.source,
                         SyncEndpointState.locale,
                         SyncEndpointState.source_theme,
                     )
@@ -123,6 +129,12 @@ class AdminService:
                     )
                 )
             )
+            source = await session.scalar(
+                select(SyncRun.source)
+                .where(SyncRun.finished_at.is_not(None))
+                .order_by(SyncRun.id.desc())
+                .limit(1)
+            )
             unfinished_broadcasts = await session.scalar(
                 select(func.count())
                 .select_from(Broadcast)
@@ -134,6 +146,7 @@ class AdminService:
             endpoint_failures or 0,
             tuple(
                 AdminEndpointStatus(
+                    endpoint.source,
                     endpoint.locale,
                     endpoint.source_theme,
                     endpoint.last_status,
@@ -146,6 +159,8 @@ class AdminService:
             pending_classifications or 0,
             pending_outbox or 0,
             unfinished_broadcasts or 0,
+            source,
+            sync.fallback_since if sync else None,
         )
 
     async def stats(self) -> AdminStats:

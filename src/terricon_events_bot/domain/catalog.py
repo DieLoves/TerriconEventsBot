@@ -10,6 +10,14 @@ from terricon_events_bot.domain.enums import (
     Locale,
     TranslationSource,
 )
+from terricon_events_bot.domain.event_kinds import PROGRAM_KINDS, EventKind
+
+
+class CatalogScope(StrEnum):
+    """Main menu section: ordinary events, or accelerator/incubator/course programs."""
+
+    EVENTS = "e"
+    PROGRAMS = "p"
 
 
 class CatalogSection(StrEnum):
@@ -57,16 +65,23 @@ class CatalogFilter:
     category: CategorySlug | None = None
     event_format: EventFormat | None = None
     language: EventLanguage | None = None
+    # Programs are filtered by kind only; events ignore the kind.
+    scope: CatalogScope = CatalogScope.EVENTS
+    program_kind: EventKind | None = None
 
     def __post_init__(self) -> None:
         if self.period not in _SECTION_PERIODS[self.section]:
             raise ValueError("Catalog period does not belong to the selected section")
         if self.event_format is EventFormat.UNKNOWN:
             raise ValueError("Unknown is not a selectable catalog format")
+        if self.program_kind is not None and self.program_kind not in PROGRAM_KINDS:
+            raise ValueError("Only program kinds can filter programs")
 
     @classmethod
-    def default(cls, section: CatalogSection) -> CatalogFilter:
-        return cls(section=section, period=CatalogPeriod.ALL)
+    def default(
+        cls, section: CatalogSection, scope: CatalogScope = CatalogScope.EVENTS
+    ) -> CatalogFilter:
+        return cls(section=section, period=CatalogPeriod.ALL, scope=scope)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +109,10 @@ class CatalogState:
             "language": (
                 self.filters.language.value if self.filters.language is not None else None
             ),
+            "scope": self.filters.scope.value,
+            "kind": (
+                self.filters.program_kind.value if self.filters.program_kind is not None else None
+            ),
             "page": self.page,
         }
 
@@ -105,6 +124,7 @@ class CatalogState:
         category_value = data.get("category")
         format_value = data.get("format")
         language_value = data.get("language")
+        kind_value = data.get("kind")
         page = data.get("page", 1)
         if not isinstance(page, int) or isinstance(page, bool) or page < 1:
             raise ValueError("Catalog page must be positive")
@@ -115,6 +135,8 @@ class CatalogState:
                 category=CategorySlug(category_value) if category_value is not None else None,
                 event_format=EventFormat(format_value) if format_value is not None else None,
                 language=EventLanguage(language_value) if language_value is not None else None,
+                scope=CatalogScope(data.get("scope", CatalogScope.EVENTS.value)),
+                program_kind=EventKind(kind_value) if kind_value is not None else None,
             ),
             page=page,
         )
@@ -128,6 +150,7 @@ class EventSummary:
     event_format: EventFormat
     categories: tuple[CategorySlug, ...]
     translation_source: TranslationSource
+    event_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +172,7 @@ class EventDetails:
     categories: tuple[CategorySlug, ...]
     locale: Locale
     translation_source: TranslationSource
+    event_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

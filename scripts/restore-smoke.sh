@@ -10,7 +10,7 @@ readonly RESTORE_TMPFS_SIZE="${RESTORE_TMPFS_SIZE:-1g}"
 readonly RESTORE_USER="restore_smoke"
 readonly RESTORE_DB="restore_smoke"
 readonly RESTORE_PASSWORD="restore-smoke-only"
-readonly EXPECTED_SCHEMA_REVISION="${EXPECTED_SCHEMA_REVISION:-0011_groq_shared_quota}"
+readonly EXPECTED_SCHEMA_REVISION="${EXPECTED_SCHEMA_REVISION:-0012_hybrid_source}"
 readonly MIN_PUBLIC_TABLES="${MIN_PUBLIC_TABLES:-26}"
 
 if [[ ! "$MIN_PUBLIC_TABLES" =~ ^[1-9][0-9]*$ ]]; then

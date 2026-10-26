@@ -16,11 +16,13 @@ from terricon_events_bot.domain.enums import (
     FeedbackKind,
     Locale,
 )
+from terricon_events_bot.domain.event_kinds import EventKind
 
 
 class NavigationView(StrEnum):
     MENU = "m"
     EVENTS = "e"
+    PROGRAMS = "g"
     CATEGORIES = "c"
     FILTERS = "f"
     SETTINGS = "s"
@@ -120,6 +122,14 @@ class CatalogLanguageAllCallback(CallbackData, prefix="cla"):
     pass
 
 
+class ProgramKindCallback(CallbackData, prefix="gk"):
+    kind: EventKind
+
+
+class ProgramKindAllCallback(CallbackData, prefix="gka"):
+    pass
+
+
 class CatalogPageCallback(CallbackData, prefix="pg"):
     page: int
 
@@ -149,6 +159,10 @@ class SubscriptionAllCallback(CallbackData, prefix="sa"):
 
 class SubscriptionCategoryCallback(CallbackData, prefix="sb"):
     category: CategorySlug
+
+
+class SubscriptionProgramsCallback(CallbackData, prefix="sp"):
+    pass
 
 
 class FeedbackKindCallback(CallbackData, prefix="fk"):

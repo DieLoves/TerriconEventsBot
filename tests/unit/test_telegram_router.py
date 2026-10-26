@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from terricon_events_bot.domain.catalog import (
     CatalogFilter,
     CatalogPage,
     CatalogPeriod,
+    CatalogScope,
     CatalogSection,
     CatalogState,
     EventLanguage,
@@ -29,6 +31,7 @@ from terricon_events_bot.domain.enums import (
     Locale,
     TranslationSource,
 )
+from terricon_events_bot.domain.event_kinds import EventKind
 from terricon_events_bot.infrastructure.assets import AssetResolver
 from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.localization import LocalizationCatalog
@@ -40,6 +43,7 @@ from terricon_events_bot.telegram.callbacks import (
     EventCallback,
     NavigationCallback,
     NavigationView,
+    ProgramKindCallback,
     SubscriptionCategoryCallback,
 )
 from terricon_events_bot.telegram.feedback import FeedbackTelegramController
@@ -70,12 +74,14 @@ def controller(
     subscriptions.get = AsyncMock()
     subscriptions.toggle_all = AsyncMock()
     subscriptions.toggle_category = AsyncMock()
+    subscriptions.toggle_programs = AsyncMock()
     catalog = Mock(spec=CatalogQuery)
     catalog.list = AsyncMock()
     catalog.get = AsyncMock()
     state_store = Mock(spec=CatalogStateStore)
     state_store.load = AsyncMock()
     state_store.save = AsyncMock()
+    state_store.switch = AsyncMock()
     renderer = Mock(spec=ScreenRenderer)
     renderer.render = AsyncMock()
     views = TelegramViews(
@@ -222,7 +228,7 @@ def narrowed_state(section: CatalogSection = CatalogSection.UPCOMING) -> Catalog
 @pytest.mark.asyncio
 async def test_events_menu_opens_saved_list_on_first_page_in_one_tap(tmp_path: Path) -> None:
     handler, _, catalog, state_store, renderer = controller(tmp_path)
-    state_store.load.return_value = narrowed_state()
+    state_store.switch.return_value = replace(narrowed_state(), page=1)
     catalog.list.return_value = page()
 
     await handler.navigate(
@@ -230,6 +236,8 @@ async def test_events_menu_opens_saved_list_on_first_page_in_one_tap(tmp_path: P
         NavigationCallback(view=NavigationView.EVENTS),
         current_user(),
     )
+
+    assert state_store.switch.await_args.args[1] is CatalogScope.EVENTS
 
     filters, _, requested_page = catalog.list.await_args.args
     assert filters == narrowed_state().filters
@@ -313,3 +321,43 @@ async def test_start_leaves_feedback_wizard_and_shows_a_fresh_menu(tmp_path: Pat
     call = renderer.render.await_args
     assert call.kwargs == {"fresh": True}
     assert call.args[2].text.startswith("<b>Главное меню</b>")
+
+
+@pytest.mark.asyncio
+async def test_programs_menu_switches_section_and_kind_filter_keeps_it(tmp_path: Path) -> None:
+    handler, _, catalog, state_store, renderer = controller(tmp_path)
+    programs = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING, CatalogScope.PROGRAMS))
+    state_store.switch.return_value = programs
+    catalog.list.return_value = page()
+
+    await handler.navigate(
+        cast(CallbackQuery, FakeCallback()),
+        NavigationCallback(view=NavigationView.PROGRAMS),
+        current_user(),
+    )
+    assert state_store.switch.await_args.args[1] is CatalogScope.PROGRAMS
+    assert "🚀 Программы" in renderer.render.await_args.args[2].text
+
+    await handler.select_program_kind(
+        cast(CallbackQuery, FakeCallback()),
+        ProgramKindCallback(kind=EventKind.INCUBATOR),
+        current_user(),
+    )
+    saved = state_store.save.await_args.args[1]
+    assert saved.filters.scope is CatalogScope.PROGRAMS
+    assert saved.filters.program_kind is EventKind.INCUBATOR
+
+
+@pytest.mark.asyncio
+async def test_program_subscription_toggle_renders_new_summary(tmp_path: Path) -> None:
+    handler, subscriptions, _, _, renderer = controller(tmp_path)
+    subscriptions.toggle_programs.return_value = SubscriptionSummary(False, (), programs=True)
+
+    await handler.toggle_subscription_programs(cast(CallbackQuery, FakeCallback()), current_user())
+
+    subscriptions.toggle_programs.assert_awaited_once_with(1)
+    assert "✓ 🚀 Новые наборы в программы" in [
+        button.text
+        for row in renderer.render.await_args.args[2].keyboard.inline_keyboard
+        for button in row
+    ]
