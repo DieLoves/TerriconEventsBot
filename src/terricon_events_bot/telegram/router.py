@@ -21,6 +21,7 @@ from terricon_events_bot.telegram.callbacks import (
     CatalogLanguageCallback,
     CatalogPageCallback,
     CatalogPeriodCallback,
+    CatalogResetCallback,
     CatalogSectionCallback,
     ChooseLocaleCallback,
     ContinueOnboardingCallback,
@@ -31,6 +32,7 @@ from terricon_events_bot.telegram.callbacks import (
     FeedbackKindCallback,
     NavigationCallback,
     NavigationView,
+    NoopCallback,
     SettingLocaleCallback,
     SettingToggleCallback,
     SubscriptionAllCallback,
@@ -63,6 +65,9 @@ class TelegramController:
         self._feedback = feedback
 
     async def start(self, message: Message, current_user: User) -> None:
+        if self._feedback is not None:
+            # /start is the universal way out, including from the feedback wizard.
+            await self._feedback.cancel_draft(current_user)
         await self._render_message(
             message,
             current_user,
@@ -120,7 +125,13 @@ class TelegramController:
         if view is NavigationView.MENU:
             screen = self._views.main_menu(current_user)
         elif view is NavigationView.EVENTS:
-            screen = self._views.event_sections(current_user)
+            state = await self._catalog_state.load(current_user.id)
+            await self._render_catalog(callback, current_user, replace(state, page=1))
+            return
+        elif view is NavigationView.CATEGORIES:
+            screen = self._views.categories(
+                current_user, await self._catalog_state.load(current_user.id)
+            )
         elif view is NavigationView.FILTERS:
             screen = self._views.filters(
                 current_user, await self._catalog_state.load(current_user.id)
@@ -149,16 +160,14 @@ class TelegramController:
         callback_data: CatalogSectionCallback,
         current_user: User,
     ) -> None:
-        await self._answer(callback)
-        if not await self._require_onboarding(callback, current_user):
-            return
-        state = CatalogState(CatalogFilter.default(callback_data.section))
-        await self._catalog_state.save(current_user.id, state)
-        await self._render_callback(
-            callback,
-            current_user,
-            self._views.categories(current_user, callback_data.section),
+        state = await self._catalog_state.load(current_user.id)
+        # Periods differ between sections; category, format and language carry over.
+        filters = replace(
+            state.filters,
+            section=callback_data.section,
+            period=CatalogFilter.default(callback_data.section).period,
         )
+        await self._show_catalog(callback, current_user, state.with_filters(filters))
 
     async def select_category(
         self,
@@ -166,25 +175,42 @@ class TelegramController:
         callback_data: CatalogCategoryCallback,
         current_user: User,
     ) -> None:
-        state = CatalogState(
-            replace(
-                CatalogFilter.default(callback_data.section),
-                category=callback_data.category,
-            )
+        state = await self._catalog_state.load(current_user.id)
+        await self._show_catalog(
+            callback,
+            current_user,
+            state.with_filters(replace(state.filters, category=callback_data.category)),
         )
-        await self._show_catalog(callback, current_user, state)
 
     async def select_all_events(
         self,
         callback: CallbackQuery,
-        callback_data: CatalogAllCallback,
         current_user: User,
     ) -> None:
+        state = await self._catalog_state.load(current_user.id)
         await self._show_catalog(
             callback,
             current_user,
-            CatalogState(CatalogFilter.default(callback_data.section)),
+            state.with_filters(replace(state.filters, category=None)),
         )
+
+    async def reset_filters(
+        self,
+        callback: CallbackQuery,
+        callback_data: CatalogResetCallback,
+        current_user: User,
+    ) -> None:
+        state = await self._catalog_state.load(current_user.id)
+        reset = state.with_filters(
+            replace(
+                CatalogFilter.default(state.filters.section),
+                category=state.filters.category,
+            )
+        )
+        if callback_data.view is NavigationView.FILTERS:
+            await self._save_and_show_filters(callback, current_user, reset)
+        else:
+            await self._show_catalog(callback, current_user, reset)
 
     async def select_page(
         self,
@@ -361,6 +387,9 @@ class TelegramController:
             callback, current_user, self._views.subscriptions(current_user, summary)
         )
 
+    async def noop(self, callback: CallbackQuery) -> None:
+        await self._answer(callback)
+
     async def unknown_callback(self, callback: CallbackQuery, current_user: User) -> None:
         await self._show_invalid(callback, current_user)
 
@@ -373,6 +402,14 @@ class TelegramController:
         await self._answer(callback)
         if not await self._require_onboarding(callback, user):
             return
+        await self._render_catalog(callback, user, state)
+
+    async def _render_catalog(
+        self,
+        callback: CallbackQuery,
+        user: User,
+        state: CatalogState,
+    ) -> None:
         page = await self._catalog.list(state.filters, user.locale, state.page)
         persisted = replace(state, page=page.page)
         await self._catalog_state.save(user.id, persisted)
@@ -449,7 +486,8 @@ class TelegramController:
         return False
 
     async def _render_message(self, message: Message, user: User, screen: Screen) -> None:
-        await self._renderer.render(user.id, message.chat.id, screen)
+        # A typed message pushes the old screen up the history; show a fresh one below it.
+        await self._renderer.render(user.id, message.chat.id, screen, fresh=True)
 
     async def _render_callback(self, callback: CallbackQuery, user: User, screen: Screen) -> None:
         if callback.message is None:
@@ -498,6 +536,7 @@ def build_user_router(
     router.callback_query.register(controller.select_section, CatalogSectionCallback.filter())
     router.callback_query.register(controller.select_category, CatalogCategoryCallback.filter())
     router.callback_query.register(controller.select_all_events, CatalogAllCallback.filter())
+    router.callback_query.register(controller.reset_filters, CatalogResetCallback.filter())
     router.callback_query.register(controller.select_period, CatalogPeriodCallback.filter())
     router.callback_query.register(controller.select_format, CatalogFormatCallback.filter())
     router.callback_query.register(controller.clear_format, CatalogFormatAllCallback.filter())
@@ -517,6 +556,7 @@ def build_user_router(
         router.callback_query.register(feedback.choose_kind, FeedbackKindCallback.filter())
         router.callback_query.register(feedback.action, FeedbackActionCallback.filter())
         router.callback_query.register(feedback.delete_profile, DeleteProfileCallback.filter())
+    router.callback_query.register(controller.noop, NoopCallback.filter())
     router.callback_query.register(controller.unknown_callback)
     router.message.register(controller.unknown_message)
     return router

@@ -31,6 +31,7 @@ from terricon_events_bot.domain.enums import SyncTrigger
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
 from terricon_events_bot.infrastructure.logging import configure_logging
 from terricon_events_bot.telegram.alerts import AiogramAdminAlertGateway
+from terricon_events_bot.telegram.commands import publish_user_commands
 
 _LOGGER = logging.getLogger(__name__)
 _HEARTBEAT_INTERVAL_SECONDS = 30
@@ -261,6 +262,7 @@ async def run_bot(settings: Settings, project_root: Path) -> None:
     try:
         await operations.preflight()
         await foundation.user_service.reconcile_access()
+        await publish_user_commands(foundation.bot, foundation.localizations)
         await operations.heartbeat(details={"state": "starting"})
         jobs = RuntimeJobs(foundation, operations, alerts, runtime_alerts)
         scheduler = build_scheduler(settings, jobs)

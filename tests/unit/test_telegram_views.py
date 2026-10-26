@@ -163,7 +163,7 @@ def test_kz_locale_and_image_preferences_are_applied(tmp_path: Path) -> None:
         stale=False,
     )
 
-    assert telegram_views.main_menu(kz_user).text == "<b>Басты мәзір</b>"
+    assert telegram_views.main_menu(kz_user).text.startswith("<b>Басты мәзір</b>\n")
     assert telegram_views.main_menu(kz_user).image == main_image
     assert telegram_views.main_menu(no_images).image is None
     assert telegram_views.catalog_list(kz_user, state, page).image == category_image
@@ -189,14 +189,14 @@ def test_feedback_wizard_and_delete_warning_require_confirmation(tmp_path: Path)
     privacy = telegram_views.privacy(current_user, warning=True)
 
     assert {button.text for row in feedback.keyboard.inline_keyboard for button in row} >= {
-        "Ошибка",
-        "Идея",
-        "Другое",
+        "🐞 Ошибка",
+        "💡 Идея",
+        "✉️ Другое",
     }
     assert "Unsafe &lt;text&gt;" in preview.text
     assert "Preview &lt;Name&gt;" in preview.text
     assert "@preview_user" in preview.text
-    assert "Подтвердить" in {
+    assert "🗑 Да, удалить" in {
         button.text for row in privacy.keyboard.inline_keyboard for button in row
     }
 
@@ -215,7 +215,7 @@ def test_feedback_preview_fits_telegram_after_html_escaping(tmp_path: Path) -> N
     assert len(preview.text) <= 4096
     assert "…" in preview.text
     assert "<&" not in preview.text
-    assert "Подтвердить" in {
+    assert "📨 Отправить" in {
         button.text for row in preview.keyboard.inline_keyboard for button in row
     }
 
@@ -239,4 +239,73 @@ def test_upcoming_card_without_registration_links_to_announced_stream(tmp_path: 
         for button in row
         if button.url is not None
     ]
-    assert links == [("Подробнее", stream)]
+    assert links == [("🔗 Подробнее", stream)]
+
+
+def summary(event_id: int) -> EventSummary:
+    return EventSummary(
+        id=event_id,
+        title=f"Event {event_id}",
+        starts_at=datetime(2030, 1, 1, tzinfo=UTC),
+        event_format=EventFormat.OFFLINE,
+        categories=(),
+        translation_source=TranslationSource.OFFICIAL,
+    )
+
+
+def button_rows(screen: object) -> list[list[str]]:
+    keyboard = screen.keyboard  # type: ignore[attr-defined]
+    return [[button.text for button in row] for row in keyboard.inline_keyboard]
+
+
+def test_catalog_list_shows_active_filters_and_unambiguous_navigation(tmp_path: Path) -> None:
+    state = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING), page=2)
+    listing = CatalogPage(items=(summary(1), summary(2)), page=2, pages=3, total=12, stale=False)
+
+    screen = views(tmp_path).catalog_list(user(), state, listing)
+
+    assert screen.text.startswith("<b>🗓 Актуальные</b> · Все категории\n")  # noqa: RUF001
+    assert "Любые даты · Любой формат · Любой язык" in screen.text
+    assert button_rows(screen) == [
+        ["1. Event 1"],
+        ["2. Event 2"],
+        ["◀️", "2/3", "▶️"],
+        ["🗂 Категория", "🔎 Фильтры"],
+        ["📦 Архив", "🏠 В меню"],  # noqa: RUF001
+    ]
+
+
+def test_empty_list_offers_reset_only_when_filters_narrow_it(tmp_path: Path) -> None:
+    telegram_views = views(tmp_path)
+    empty = CatalogPage(items=(), page=1, pages=1, total=0, stale=False)
+    narrowed = CatalogState(
+        CatalogFilter(
+            CatalogSection.ARCHIVE, CatalogPeriod.DAYS_30, event_format=EventFormat.ONLINE
+        )
+    )
+    default = CatalogState(CatalogFilter.default(CatalogSection.ARCHIVE))
+
+    narrowed_rows = button_rows(telegram_views.catalog_list(user(), narrowed, empty))
+    default_rows = button_rows(telegram_views.catalog_list(user(), default, empty))
+
+    assert ["♻️ Сбросить фильтры"] in narrowed_rows
+    assert ["♻️ Сбросить фильтры"] not in default_rows
+    assert ["🗓 Актуальные", "🏠 В меню"] in default_rows  # noqa: RUF001
+
+
+def test_card_and_description_navigation_never_reuse_one_label(tmp_path: Path) -> None:
+    telegram_views = views(tmp_path)
+    state = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING))
+
+    card = telegram_views.event_card(
+        user(), state, event(), page=1, previous=(5, 1), following=(6, 2)
+    )
+    description = telegram_views.description(
+        user(), event(description="word " * 2000), list_page=1, content_page=1
+    )
+
+    assert button_rows(card)[-1] == ["◀️", "📋 К списку", "▶️"]  # noqa: RUF001
+    assert button_rows(description) == [["1/4", "▶️"], ["⬅️ К мероприятию"]]  # noqa: RUF001
+    for screen in (card, description):
+        labels = [text for row in button_rows(screen) for text in row]
+        assert len(labels) == len(set(labels))

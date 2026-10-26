@@ -45,15 +45,24 @@ class ScreenRenderer:
         # Telegram file IDs of uploaded local assets, so each file is uploaded once per process.
         self._uploaded_file_ids: dict[Path, str] = {}
 
-    async def render(self, user_id: int, chat_id: int, screen: Screen) -> int:
+    async def render(
+        self, user_id: int, chat_id: int, screen: Screen, *, fresh: bool = False
+    ) -> int:
+        """Show ``screen`` as the user's single bot screen.
+
+        The current screen is edited in place unless ``fresh`` is set; then a new
+        message is sent below the conversation and the old screen is deleted.
+        """
         lock = self._user_locks.get(user_id)
         if lock is None:
             lock = asyncio.Lock()
             self._user_locks[user_id] = lock
         async with lock:
-            return await self._render_serialized(user_id, chat_id, screen)
+            return await self._render_serialized(user_id, chat_id, screen, fresh)
 
-    async def _render_serialized(self, user_id: int, chat_id: int, screen: Screen) -> int:
+    async def _render_serialized(
+        self, user_id: int, chat_id: int, screen: Screen, fresh: bool
+    ) -> int:
         new_message_id: int | None = None
         old_message: tuple[int, int] | None = None
         async with self._session_factory() as session:
@@ -64,7 +73,7 @@ class ScreenRenderer:
             old_message_id = user.current_menu_message_id
         image = screen.image if len(screen.text) <= _CAPTION_LIMIT else None
 
-        if old_chat_id == chat_id and old_message_id is not None:
+        if not fresh and old_chat_id == chat_id and old_message_id is not None:
             edited = await self._try_edit(chat_id, old_message_id, screen, image)
             if edited:
                 return old_message_id

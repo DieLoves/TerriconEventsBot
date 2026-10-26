@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import html
-from collections.abc import Iterable, Sequence
-from dataclasses import replace
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -13,6 +12,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from terricon_events_bot.application.feedback import FeedbackDraft
 from terricon_events_bot.application.subscriptions import SubscriptionSummary
 from terricon_events_bot.domain.catalog import (
+    CatalogFilter,
     CatalogPage,
     CatalogPeriod,
     CatalogSection,
@@ -40,6 +40,7 @@ from terricon_events_bot.telegram.callbacks import (
     CatalogLanguageCallback,
     CatalogPageCallback,
     CatalogPeriodCallback,
+    CatalogResetCallback,
     CatalogSectionCallback,
     ChooseLocaleCallback,
     ContinueOnboardingCallback,
@@ -51,6 +52,7 @@ from terricon_events_bot.telegram.callbacks import (
     FeedbackKindCallback,
     NavigationCallback,
     NavigationView,
+    NoopCallback,
     SettingLocaleCallback,
     SettingToggleCallback,
     SubscriptionAllCallback,
@@ -64,6 +66,23 @@ _BUTTON_TEXT_LIMIT = 60
 _TITLE_LIMIT = 180
 _DESCRIPTION_CHUNK_LIMIT = 2800
 _SCREEN_TEXT_LIMIT = 4096
+_MENU_ROWS = (
+    (("menu.events", NavigationView.EVENTS, "🗓"),),
+    (
+        ("menu.subscriptions", NavigationView.SUBSCRIPTIONS, "🔔"),
+        ("menu.settings", NavigationView.SETTINGS, "⚙️"),
+    ),
+    (
+        ("menu.feedback", NavigationView.FEEDBACK, "💬"),
+        ("menu.about", NavigationView.ABOUT, "ℹ️"),  # noqa: RUF001
+    ),
+)
+_SECTION_ICONS = {CatalogSection.UPCOMING: "🗓", CatalogSection.ARCHIVE: "📦"}
+_FEEDBACK_KIND_ICONS = {
+    FeedbackKind.ERROR: "🐞",
+    FeedbackKind.IDEA: "💡",
+    FeedbackKind.OTHER: "✉️",
+}
 
 
 class TelegramViews:
@@ -87,10 +106,12 @@ class TelegramViews:
                 ),
             )
         )
-        return Screen(
-            text=self._escape(self._text(Locale.RU, "onboarding.choose_language")),
-            keyboard=keyboard,
+        # The interface language is unknown yet, so the prompt is bilingual.
+        prompt = "\n".join(
+            self._escape(self._text(locale, "onboarding.choose_language"))
+            for locale in (Locale.RU, Locale.KZ)
         )
+        return Screen(text=prompt, keyboard=keyboard)
 
     def onboarding_intro(self, locale: Locale) -> Screen:
         return Screen(
@@ -110,83 +131,63 @@ class TelegramViews:
     def main_menu(self, user: User) -> Screen:
         locale = user.locale
         rows = tuple(
-            (self._callback_button(self._text(locale, key), NavigationCallback(view=view)),)
-            for key, view in (
-                ("menu.events", NavigationView.EVENTS),
-                ("menu.subscriptions", NavigationView.SUBSCRIPTIONS),
-                ("menu.settings", NavigationView.SETTINGS),
-                ("menu.feedback", NavigationView.FEEDBACK),
-                ("menu.about", NavigationView.ABOUT),
+            tuple(
+                self._callback_button(
+                    f"{icon} {self._text(locale, key)}", NavigationCallback(view=view)
+                )
+                for key, view, icon in row
             )
+            for row in _MENU_ROWS
         )
         return Screen(
-            text=f"<b>{self._escape(self._text(locale, 'menu.title'))}</b>",
+            text=(
+                f"<b>{self._escape(self._text(locale, 'menu.title'))}</b>\n"
+                f"{self._escape(self._text(locale, 'menu.subtitle'))}"
+            ),
             keyboard=self._keyboard(rows),
             image=self._assets.main(locale) if user.menu_images_enabled else None,
         )
 
-    def event_sections(self, user: User) -> Screen:
+    def categories(self, user: User, state: CatalogState) -> Screen:
         locale = user.locale
-        return Screen(
-            text=f"<b>{self._escape(self._text(locale, 'events.title'))}</b>",
-            keyboard=self._keyboard(
-                (
-                    (
-                        self._callback_button(
-                            self._text(locale, "events.upcoming"),
-                            CatalogSectionCallback(section=CatalogSection.UPCOMING),
-                        ),
-                        self._callback_button(
-                            self._text(locale, "events.archive"),
-                            CatalogSectionCallback(section=CatalogSection.ARCHIVE),
-                        ),
-                    ),
-                    self._back_row(locale, NavigationView.MENU),
-                )
-            ),
-        )
-
-    def categories(self, user: User, section: CatalogSection) -> Screen:
-        locale = user.locale
+        current = state.filters.category
         rows: list[tuple[InlineKeyboardButton, ...]] = [
             (
                 self._callback_button(
-                    self._text(locale, "events.all"),
-                    CatalogAllCallback(section=section),
+                    self._selected(self._text(locale, "events.all_categories"), current is None),
+                    CatalogAllCallback(),
                 ),
             )
         ]
         rows.extend(
             (
                 self._callback_button(
-                    self._text(locale, f"categories.{category.value}"),
-                    CatalogCategoryCallback(section=section, category=category),
+                    self._selected(
+                        self._text(locale, f"categories.{category.value}"),
+                        category is current,
+                    ),
+                    CatalogCategoryCallback(category=category),
                 ),
             )
             for category in CategorySlug
         )
-        rows.append(self._back_row(locale, NavigationView.EVENTS))
-        title_key = "events.upcoming" if section is CatalogSection.UPCOMING else "events.archive"
+        rows.append(self._list_back_row(locale, state.page))
         return Screen(
             text=(
-                f"<b>{self._escape(self._text(locale, title_key))}</b>\n"
-                f"{self._escape(self._text(locale, 'events.all'))}"
+                f"<b>{self._escape(self._text(locale, 'events.category'))}</b>\n"
+                f"{self._escape(self._text(locale, 'events.category_hint'))}"
             ),
             keyboard=self._keyboard(rows),
         )
 
     def catalog_list(self, user: User, state: CatalogState, page: CatalogPage) -> Screen:
         locale = user.locale
-        section_key = (
-            "events.upcoming"
-            if state.filters.section is CatalogSection.UPCOMING
-            else "events.archive"
-        )
-        lines = [f"<b>{self._escape(self._text(locale, section_key))}</b>"]
-        if state.filters.category is not None:
-            lines.append(
-                self._escape(self._text(locale, f"categories.{state.filters.category.value}"))
-            )
+        filters = state.filters
+        lines = [
+            f"<b>{self._escape(self._section_title(locale, filters.section))}</b> · "
+            f"{self._escape(self._category_name(locale, filters.category))}",
+            f"🔎 {self._escape(self._filter_summary(locale, filters))}",
+        ]
         if page.stale:
             lines.extend(("", f"⚠️ {self._escape(self._text(locale, 'common.stale_data'))}"))
         if not page.items:
@@ -194,16 +195,15 @@ class TelegramViews:
         else:
             for index, event in enumerate(page.items, start=1):
                 lines.append(
-                    f"\n{index}. {self._escape(self._short(event.title, _TITLE_LIMIT))}\n"
-                    f"   {self._escape(self._format_date(event.starts_at))} · "
+                    f"\n<b>{index}.</b> {self._escape(self._short(event.title, _TITLE_LIMIT))}\n"
+                    f"📅 {self._escape(self._format_date(event.starts_at))} · "
                     f"{self._escape(self._format_name(locale, event.event_format))}"
                 )
-        lines.append(f"\n{page.page}/{page.pages}")
 
         rows: list[tuple[InlineKeyboardButton, ...]] = [
             (
                 self._callback_button(
-                    self._short(event.title, _BUTTON_TEXT_LIMIT),
+                    f"{index}. {self._short(event.title, _BUTTON_TEXT_LIMIT)}",
                     EventCallback(
                         event_id=event.id,
                         action=EventAction.CARD,
@@ -211,39 +211,53 @@ class TelegramViews:
                     ),
                 ),
             )
-            for event in page.items
+            for index, event in enumerate(page.items, start=1)
         ]
-        pagination: list[InlineKeyboardButton] = []
-        if page.page > 1:
-            pagination.append(
-                self._callback_button(
-                    self._text(locale, "common.back"),
-                    CatalogPageCallback(page=page.page - 1),
-                )
-            )
-        if page.page < page.pages:
-            pagination.append(
-                self._callback_button(
-                    self._text(locale, "common.next"),
-                    CatalogPageCallback(page=page.page + 1),
-                )
-            )
+        pagination = self._pagination_row(
+            page.page,
+            page.pages,
+            lambda number: CatalogPageCallback(page=number),
+        )
         if pagination:
-            rows.append(tuple(pagination))
+            rows.append(pagination)
+        if not page.items and self._filters_narrowed(filters):
+            rows.append(
+                (
+                    self._callback_button(
+                        f"♻️ {self._text(locale, 'events.reset_filters')}",
+                        CatalogResetCallback(view=NavigationView.EVENTS),
+                    ),
+                )
+            )
+        other_section = (
+            CatalogSection.ARCHIVE
+            if filters.section is CatalogSection.UPCOMING
+            else CatalogSection.UPCOMING
+        )
         rows.extend(
             (
                 (
                     self._callback_button(
-                        self._text(locale, "filters.title"),
+                        f"🗂 {self._text(locale, 'events.category')}",
+                        NavigationCallback(view=NavigationView.CATEGORIES),
+                    ),
+                    self._callback_button(
+                        f"🔎 {self._text(locale, 'filters.title')}",
                         NavigationCallback(view=NavigationView.FILTERS),
                     ),
                 ),
-                self._back_row(locale, NavigationView.EVENTS),
+                (
+                    self._callback_button(
+                        self._section_title(locale, other_section),
+                        CatalogSectionCallback(section=other_section),
+                    ),
+                    self._menu_button(locale),
+                ),
             )
         )
         image: Path | None = None
-        if user.menu_images_enabled and state.filters.category is not None:
-            image = self._assets.category(locale, state.filters.category)
+        if user.menu_images_enabled and filters.category is not None:
+            image = self._assets.category(locale, filters.category)
         return Screen(text="\n".join(lines), keyboard=self._keyboard(rows), image=image)
 
     def filters(self, user: User, state: CatalogState) -> Screen:
@@ -303,15 +317,30 @@ class TelegramViews:
                 )
                 for language in EventLanguage
             ),
+        ]
+        if self._filters_narrowed(filters):
+            rows.append(
+                (
+                    self._callback_button(
+                        f"♻️ {self._text(locale, 'events.reset_filters')}",
+                        CatalogResetCallback(view=NavigationView.FILTERS),
+                    ),
+                )
+            )
+        rows.append(
             (
                 self._callback_button(
-                    self._text(locale, "events.list_back"),
+                    f"✅ {self._text(locale, 'filters.show')}",
                     CatalogPageCallback(page=state.page),
                 ),
-            ),
-        ]
+            )
+        )
         return Screen(
-            text=f"<b>{self._escape(self._text(locale, 'filters.title'))}</b>",
+            text=(
+                f"<b>{self._escape(self._text(locale, 'filters.title'))}</b> · "
+                f"{self._escape(self._section_title(locale, filters.section))}\n"
+                f"{self._escape(self._text(locale, 'filters.hint'))}"
+            ),
             keyboard=self._keyboard(rows),
         )
 
@@ -335,11 +364,13 @@ class TelegramViews:
         lines = [
             f"<b>{self._escape(self._short(event.title, _TITLE_LIMIT))}</b>",
             "",
-            self._field(locale, "events.date", self._format_date(event.starts_at)),
-            self._field(locale, "events.format", self._format_name(locale, event.event_format)),
-            self._field(locale, "events.address", event.address),
-            self._field(locale, "events.language", language_names),
-            self._field(locale, "events.categories", categories),
+            self._field(locale, "events.date", self._format_date(event.starts_at), "📅"),
+            self._field(
+                locale, "events.format", self._format_name(locale, event.event_format), "💻"
+            ),
+            self._field(locale, "events.address", event.address, "📍"),
+            self._field(locale, "events.language", language_names, "🗣"),
+            self._field(locale, "events.categories", categories, "🏷"),
         ]
         if event.translation_source is TranslationSource.MACHINE:
             lines.extend(
@@ -348,7 +379,7 @@ class TelegramViews:
         rows: list[tuple[InlineKeyboardButton, ...]] = [
             (
                 self._callback_button(
-                    self._text(locale, "events.description"),
+                    f"📄 {self._text(locale, 'events.description')}",
                     EventCallback(
                         event_id=event.id,
                         action=EventAction.DESCRIPTION,
@@ -360,11 +391,11 @@ class TelegramViews:
         external = self._external_button(locale, state.filters.section, event)
         if external is not None:
             rows.append((external,))
-        adjacent: list[InlineKeyboardButton] = []
+        navigation: list[InlineKeyboardButton] = []
         if previous is not None:
-            adjacent.append(
+            navigation.append(
                 self._callback_button(
-                    self._text(locale, "common.back"),
+                    "◀️",
                     EventCallback(
                         event_id=previous[0],
                         action=EventAction.CARD,
@@ -372,10 +403,16 @@ class TelegramViews:
                     ),
                 )
             )
+        navigation.append(
+            self._callback_button(
+                f"📋 {self._text(locale, 'events.list_back')}",
+                CatalogPageCallback(page=page),
+            )
+        )
         if following is not None:
-            adjacent.append(
+            navigation.append(
                 self._callback_button(
-                    self._text(locale, "common.next"),
+                    "▶️",
                     EventCallback(
                         event_id=following[0],
                         action=EventAction.CARD,
@@ -383,16 +420,7 @@ class TelegramViews:
                     ),
                 )
             )
-        if adjacent:
-            rows.append(tuple(adjacent))
-        rows.append(
-            (
-                self._callback_button(
-                    self._text(locale, "events.list_back"),
-                    CatalogPageCallback(page=page),
-                ),
-            )
-        )
+        rows.append(tuple(navigation))
         poster = safe_http_url(event.poster_url) if user.event_posters_enabled else None
         return Screen(text="\n".join(lines), keyboard=self._keyboard(rows), image=poster)
 
@@ -415,41 +443,24 @@ class TelegramViews:
             lines.extend(
                 ("", f"🤖 {self._escape(self._text(locale, 'events.machine_translation'))}")
             )
-        if len(chunks) > 1:
-            lines.append(f"\n{selected_page}/{len(chunks)}")
 
-        pagination: list[InlineKeyboardButton] = []
-        if selected_page > 1:
-            pagination.append(
-                self._callback_button(
-                    self._text(locale, "common.back"),
-                    EventCallback(
-                        event_id=event.id,
-                        action=EventAction.DESCRIPTION,
-                        list_page=list_page,
-                        content_page=selected_page - 1,
-                    ),
-                )
-            )
-        if selected_page < len(chunks):
-            pagination.append(
-                self._callback_button(
-                    self._text(locale, "common.next"),
-                    EventCallback(
-                        event_id=event.id,
-                        action=EventAction.DESCRIPTION,
-                        list_page=list_page,
-                        content_page=selected_page + 1,
-                    ),
-                )
-            )
         rows: list[tuple[InlineKeyboardButton, ...]] = []
+        pagination = self._pagination_row(
+            selected_page,
+            len(chunks),
+            lambda number: EventCallback(
+                event_id=event.id,
+                action=EventAction.DESCRIPTION,
+                list_page=list_page,
+                content_page=number,
+            ),
+        )
         if pagination:
-            rows.append(tuple(pagination))
+            rows.append(pagination)
         rows.append(
             (
                 self._callback_button(
-                    self._text(locale, "common.back"),
+                    f"⬅️ {self._text(locale, 'events.card_back')}",
                     EventCallback(
                         event_id=event.id,
                         action=EventAction.CARD,
@@ -465,16 +476,20 @@ class TelegramViews:
         enabled = self._text(locale, "settings.enabled")
         disabled = self._text(locale, "settings.disabled")
         return Screen(
-            text=f"<b>{self._escape(self._text(locale, 'settings.title'))}</b>",
+            text=(
+                f"<b>{self._escape(self._text(locale, 'settings.title'))}</b>\n\n"
+                f"{self._escape(self._text(locale, 'settings.language'))}: "
+                f"{self._escape(self._text(locale, f'languages.{locale.value}'))}"
+            ),
             keyboard=self._keyboard(
                 (
                     (
                         self._callback_button(
-                            self._selected("RU", locale is Locale.RU),
+                            self._selected("Русский", locale is Locale.RU),
                             SettingLocaleCallback(locale=Locale.RU),
                         ),
                         self._callback_button(
-                            self._selected("KZ", locale is Locale.KZ),
+                            self._selected("Қазақша", locale is Locale.KZ),
                             SettingLocaleCallback(locale=Locale.KZ),
                         ),
                     ),
@@ -494,11 +509,11 @@ class TelegramViews:
                     ),
                     (
                         self._callback_button(
-                            self._text(locale, "settings.privacy"),
+                            f"🔒 {self._text(locale, 'settings.privacy')}",
                             NavigationCallback(view=NavigationView.PRIVACY),
                         ),
                     ),
-                    self._back_row(locale, NavigationView.MENU),
+                    (self._menu_button(locale),),
                 )
             ),
         )
@@ -506,7 +521,7 @@ class TelegramViews:
     def subscriptions(self, user: User, summary: SubscriptionSummary) -> Screen:
         locale = user.locale
         if summary.subscribe_all:
-            body = self._text(locale, "subscriptions.all_events")
+            body = f"• {self._escape(self._text(locale, 'subscriptions.all_events'))}"
         elif summary.categories:
             body = "\n".join(
                 f"• {self._escape(self._text(locale, f'categories.{category.value}'))}"
@@ -538,60 +553,84 @@ class TelegramViews:
             )
             for category in CategorySlug
         )
-        rows.append(self._back_row(locale, NavigationView.MENU))
+        rows.append((self._menu_button(locale),))
         return Screen(
-            text=f"<b>{self._escape(self._text(locale, 'subscriptions.title'))}</b>\n\n{body}",
+            text=(
+                f"<b>{self._escape(self._text(locale, 'subscriptions.title'))}</b>\n"
+                f"{self._escape(self._text(locale, 'subscriptions.hint'))}\n\n"
+                f"<b>{self._escape(self._text(locale, 'subscriptions.current'))}:</b>\n{body}"
+            ),
             keyboard=self._keyboard(rows),
         )
 
     def privacy(self, user: User, *, warning: bool = False) -> Screen:
         locale = user.locale
-        text = self._text(locale, "privacy.delete_warning" if warning else "privacy.title")
-        rows: list[tuple[InlineKeyboardButton, ...]] = []
-        if not warning:
-            rows.append(
+        rows: tuple[tuple[InlineKeyboardButton, ...], ...]
+        if warning:
+            text = self._escape(self._text(locale, "privacy.delete_warning"))
+            rows = (
                 (
                     self._callback_button(
-                        self._text(locale, "privacy.delete_profile"),
-                        NavigationCallback(view=NavigationView.PRIVACY_WARNING),
-                    ),
-                )
-            )
-        else:
-            rows.append(
-                (
-                    self._callback_button(
-                        self._text(locale, "common.confirm"),
+                        f"🗑 {self._text(locale, 'privacy.delete_confirm')}",
                         DeleteProfileCallback(),
                     ),
-                )
+                ),
+                (
+                    self._callback_button(
+                        self._text(locale, "common.cancel"),
+                        NavigationCallback(view=NavigationView.PRIVACY),
+                    ),
+                ),
             )
-        rows.append(self._back_row(locale, NavigationView.SETTINGS))
-        return Screen(text=self._escape(text), keyboard=self._keyboard(rows))
+        else:
+            text = (
+                f"<b>{self._escape(self._text(locale, 'privacy.title'))}</b>\n\n"
+                f"{self._escape(self._text(locale, 'privacy.details'))}"
+            )
+            rows = (
+                (
+                    self._callback_button(
+                        f"🗑 {self._text(locale, 'privacy.delete_profile')}",
+                        NavigationCallback(view=NavigationView.PRIVACY_WARNING),
+                    ),
+                ),
+                self._back_row(locale, NavigationView.SETTINGS),
+            )
+        return Screen(text=text, keyboard=self._keyboard(rows))
 
-    def feedback(self, user: User) -> Screen:
+    def profile_deleted(self, user: User) -> Screen:
         locale = user.locale
         return Screen(
-            text=f"<b>{self._escape(self._text(locale, 'feedback.title'))}</b>",
+            text=self._escape(self._text(locale, "privacy.deleted")),
             keyboard=self._keyboard(
                 (
                     (
                         self._callback_button(
-                            self._text(locale, "feedback.kind_error"),
-                            FeedbackKindCallback(kind=FeedbackKind.ERROR),
-                        ),
-                        self._callback_button(
-                            self._text(locale, "feedback.kind_idea"),
-                            FeedbackKindCallback(kind=FeedbackKind.IDEA),
+                            f"▶️ {self._text(locale, 'privacy.restart')}",
+                            NavigationCallback(view=NavigationView.MENU),
                         ),
                     ),
-                    (
+                )
+            ),
+        )
+
+    def feedback(self, user: User) -> Screen:
+        locale = user.locale
+        return Screen(
+            text=(
+                f"<b>{self._escape(self._text(locale, 'feedback.title'))}</b>\n"
+                f"{self._escape(self._text(locale, 'feedback.hint'))}"
+            ),
+            keyboard=self._keyboard(
+                (
+                    tuple(
                         self._callback_button(
-                            self._text(locale, "feedback.kind_other"),
-                            FeedbackKindCallback(kind=FeedbackKind.OTHER),
-                        ),
+                            f"{icon} {self._text(locale, f'feedback.kind_{kind.value}')}",
+                            FeedbackKindCallback(kind=kind),
+                        )
+                        for kind, icon in _FEEDBACK_KIND_ICONS.items()
                     ),
-                    self._back_row(locale, NavigationView.MENU),
+                    (self._menu_button(locale),),
                 )
             ),
         )
@@ -650,7 +689,7 @@ class TelegramViews:
                 (
                     (
                         self._callback_button(
-                            self._text(locale, "common.confirm"),
+                            f"📨 {self._text(locale, 'feedback.send')}",
                             FeedbackActionCallback(action=FeedbackAction.CONFIRM),
                         ),
                     ),
@@ -667,7 +706,7 @@ class TelegramViews:
     def feedback_notice(self, user: User, key: str) -> Screen:
         return Screen(
             text=self._escape(self._text(user.locale, key)),
-            keyboard=self._keyboard((self._back_row(user.locale, NavigationView.MENU),)),
+            keyboard=self._keyboard(((self._menu_button(user.locale),),)),
         )
 
     def _feedback_step(self, user: User, key: str) -> Screen:
@@ -694,11 +733,11 @@ class TelegramViews:
                 (
                     (
                         InlineKeyboardButton(
-                            text=self._text(locale, "about.official_site"),
+                            text=f"🌐 {self._text(locale, 'about.official_site')}",
                             url=OFFICIAL_SITE_URL,
                         ),
                     ),
-                    self._back_row(locale, NavigationView.MENU),
+                    (self._menu_button(locale),),
                 )
             ),
         )
@@ -706,11 +745,8 @@ class TelegramViews:
     def invalid_action(self, user: User) -> Screen:
         return Screen(
             text=self._escape(self._text(user.locale, "errors.invalid_action")),
-            keyboard=self._keyboard((self._back_row(user.locale, NavigationView.MENU),)),
+            keyboard=self._keyboard(((self._menu_button(user.locale),),)),
         )
-
-    def with_period(self, state: CatalogState, period: CatalogPeriod) -> CatalogState:
-        return state.with_filters(replace(state.filters, period=period))
 
     @staticmethod
     def _keyboard(
@@ -724,7 +760,66 @@ class TelegramViews:
 
     def _back_row(self, locale: Locale, view: NavigationView) -> tuple[InlineKeyboardButton, ...]:
         return (
-            self._callback_button(self._text(locale, "common.back"), NavigationCallback(view=view)),
+            self._callback_button(
+                f"⬅️ {self._text(locale, 'common.back')}", NavigationCallback(view=view)
+            ),
+        )
+
+    def _list_back_row(self, locale: Locale, page: int) -> tuple[InlineKeyboardButton, ...]:
+        return (
+            self._callback_button(
+                f"⬅️ {self._text(locale, 'events.list_back')}", CatalogPageCallback(page=page)
+            ),
+        )
+
+    def _menu_button(self, locale: Locale) -> InlineKeyboardButton:
+        return self._callback_button(
+            f"🏠 {self._text(locale, 'common.menu')}", NavigationCallback(view=NavigationView.MENU)
+        )
+
+    def _pagination_row(
+        self, current: int, total: int, target: Callable[[int], CallbackData]
+    ) -> tuple[InlineKeyboardButton, ...]:
+        if total <= 1:
+            return ()
+        row: list[InlineKeyboardButton] = []
+        if current > 1:
+            row.append(self._callback_button("◀️", target(current - 1)))
+        row.append(self._callback_button(f"{current}/{total}", NoopCallback()))
+        if current < total:
+            row.append(self._callback_button("▶️", target(current + 1)))
+        return tuple(row)
+
+    def _section_title(self, locale: Locale, section: CatalogSection) -> str:
+        key = "events.upcoming" if section is CatalogSection.UPCOMING else "events.archive"
+        return f"{_SECTION_ICONS[section]} {self._text(locale, key)}"
+
+    def _category_name(self, locale: Locale, category: CategorySlug | None) -> str:
+        if category is None:
+            return self._text(locale, "events.all_categories")
+        return self._text(locale, f"categories.{category.value}")
+
+    def _filter_summary(self, locale: Locale, filters: CatalogFilter) -> str:
+        event_format = (
+            self._format_name(locale, filters.event_format)
+            if filters.event_format is not None
+            else self._text(locale, "filters.format_all")
+        )
+        language = (
+            self._text(locale, f"languages.{filters.language.value}")
+            if filters.language is not None
+            else self._text(locale, "filters.language_all")
+        )
+        return " · ".join(
+            (self._period_name(locale, filters.section, filters.period), event_format, language)
+        )
+
+    @staticmethod
+    def _filters_narrowed(filters: CatalogFilter) -> bool:
+        return (
+            filters.period is not CatalogPeriod.ALL
+            or filters.event_format is not None
+            or filters.language is not None
         )
 
     def _external_button(
@@ -732,24 +827,25 @@ class TelegramViews:
     ) -> InlineKeyboardButton | None:
         if section is CatalogSection.UPCOMING:
             url = safe_http_url(event.registration_url)
-            key = "events.registration"
+            key, icon = "events.registration", "📝"
             if url is None:
                 # The source closes registration early for streamed events and
                 # publishes only the broadcast link.
                 url = safe_http_url(event.recording_url)
-                key = "events.details"
+                key, icon = "events.details", "🔗"
         else:
             recording = safe_http_url(event.recording_url)
             url = recording or safe_http_url(event.details_url)
-            key = "events.recording" if recording else "events.details"
+            key, icon = ("events.recording", "🎬") if recording else ("events.details", "🔗")
         if url is None:
             return None
-        return InlineKeyboardButton(text=self._text(locale, key), url=url)
+        return InlineKeyboardButton(text=f"{icon} {self._text(locale, key)}", url=url)
 
-    def _field(self, locale: Locale, key: str, value: str | None) -> str:
+    def _field(self, locale: Locale, key: str, value: str | None, icon: str | None = None) -> str:
         content = value or self._text(locale, "common.unavailable")
         label = self._escape(self._text(locale, key))
-        return f"<b>{label}:</b> {self._escape(self._short(content, 300))}"
+        prefix = f"{icon} " if icon else ""
+        return f"{prefix}<b>{label}:</b> {self._escape(self._short(content, 300))}"
 
     def _period_name(self, locale: Locale, section: CatalogSection, period: CatalogPeriod) -> str:
         if period is CatalogPeriod.TODAY:
@@ -761,7 +857,7 @@ class TelegramViews:
         if period is CatalogPeriod.MONTHS_3:
             return self._text(locale, "filters.three_months")
         return (
-            self._text(locale, "events.all")
+            self._text(locale, "filters.any_date")
             if section is CatalogSection.UPCOMING
             else self._text(locale, "filters.all_time")
         )

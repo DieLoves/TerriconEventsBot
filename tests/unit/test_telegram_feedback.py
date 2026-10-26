@@ -59,7 +59,7 @@ async def test_feedback_gateway_copies_content_without_forwarding_or_html() -> N
     await gateway.notify_closed(100, Locale.KZ)
 
     assert bot.send_message.await_args_list[-2].kwargs["text"] == (
-        "Әкімшінің жауабы:\n\nReply body"
+        "Әкімшінің жауабы:\n\nReply body\n\nЖауап беру үшін осы чатқа хабарлама жазыңыз."  # noqa: RUF001
     )
     assert bot.send_message.await_args_list[-1].kwargs["text"] == "Өтініш жабылды."
 
@@ -126,3 +126,5 @@ async def test_invalid_feedback_text_is_reported_to_the_user() -> None:
     service.set_text.assert_awaited_once()
     screen = renderer.render.await_args.args[2]
     assert "4000" in screen.text
+    # The prompt follows the user's message instead of editing a screen above it.
+    assert renderer.render.await_args.kwargs == {"fresh": True}

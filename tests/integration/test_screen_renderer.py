@@ -122,6 +122,24 @@ async def test_deleted_or_incompatible_screen_is_replaced_and_persisted(
 
 
 @pytest.mark.asyncio
+async def test_fresh_screen_is_sent_below_the_conversation_and_old_one_removed(
+    renderer_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = renderer_database
+    user_id = await add_user(session_factory, current_message=11)
+    bot = FakeBot()
+    renderer = ScreenRenderer(cast(Bot, bot), session_factory)
+
+    assert await renderer.render(user_id, 10, screen(), fresh=True) == 20
+
+    async with session_factory() as session:
+        stored = await session.get(User, user_id)
+    assert stored is not None and stored.current_menu_message_id == 20
+    assert [name for name, _ in bot.calls] == ["send_message", "delete"]
+    assert bot.calls[-1][1] == {"chat_id": 10, "message_id": 11}
+
+
+@pytest.mark.asyncio
 async def test_not_modified_is_success_without_duplicate_message(
     renderer_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:

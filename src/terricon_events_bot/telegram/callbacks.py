@@ -21,6 +21,7 @@ from terricon_events_bot.domain.enums import (
 class NavigationView(StrEnum):
     MENU = "m"
     EVENTS = "e"
+    CATEGORIES = "c"
     FILTERS = "f"
     SETTINGS = "s"
     SUBSCRIPTIONS = "b"
@@ -86,12 +87,17 @@ class CatalogSectionCallback(CallbackData, prefix="cs"):
 
 
 class CatalogCategoryCallback(CallbackData, prefix="cc"):
-    section: CatalogSection
     category: CategorySlug
 
 
 class CatalogAllCallback(CallbackData, prefix="ca"):
-    section: CatalogSection
+    pass
+
+
+class CatalogResetCallback(CallbackData, prefix="cr"):
+    """Reset period, format and language, then return to the list or the filters."""
+
+    view: NavigationView
 
 
 class CatalogPeriodCallback(CallbackData, prefix="cp"):
@@ -116,6 +122,10 @@ class CatalogLanguageAllCallback(CallbackData, prefix="cla"):
 
 class CatalogPageCallback(CallbackData, prefix="pg"):
     page: int
+
+
+class NoopCallback(CallbackData, prefix="no"):
+    """Inert button such as a page counter."""
 
 
 class EventCallback(CallbackData, prefix="ev"):

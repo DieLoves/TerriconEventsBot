@@ -151,11 +151,11 @@ class DigestRenderer:
     def render(self, entries: Sequence[DigestEntry], locale: Locale) -> tuple[DigestChunk, ...]:
         sections = (
             (
-                self._text(locale, "notifications.new_events"),
+                f"🆕 {self._text(locale, 'notifications.new_events')}",
                 [item for item in entries if item.notification_type is NotificationType.NEW_EVENT],
             ),
             (
-                self._text(locale, "notifications.important_changes"),
+                f"✏️ {self._text(locale, 'notifications.important_changes')}",
                 [
                     item
                     for item in entries
@@ -172,14 +172,14 @@ class DigestRenderer:
             for item in items:
                 entry = self._entry_text(item, locale)
                 candidate = "\n\n".join((*current_lines, entry))
-                if len(candidate) > self._text_limit and len(current_lines) > 1:
+                if _telegram_length(candidate) > self._text_limit and len(current_lines) > 1:
                     chunks.append(DigestChunk("\n\n".join(current_lines), tuple(current_ids)))
                     current_lines = [header]
                     current_ids = []
                     candidate = "\n\n".join((header, entry))
-                if len(candidate) > self._text_limit:
-                    allowed = max(self._text_limit - len(header) - 2, 1)
-                    entry = entry[:allowed]
+                if _telegram_length(candidate) > self._text_limit:
+                    allowed = max(self._text_limit - _telegram_length(header) - 2, 1)
+                    entry = _truncate_telegram(entry, allowed)
                 current_lines.append(entry)
                 current_ids.extend(item.delivery_ids)
             chunks.append(DigestChunk("\n\n".join(current_lines), tuple(current_ids)))
@@ -188,12 +188,12 @@ class DigestRenderer:
     def _entry_text(self, entry: DigestEntry, locale: Locale) -> str:
         title = " ".join(entry.title.split())[:_TITLE_LIMIT]
         date = entry.starts_at.astimezone(self._timezone).strftime("%d.%m.%Y %H:%M")
-        lines = [f"• {title}", date]
+        lines = [f"• {title}", f"📅 {date}"]
         if entry.notification_type is NotificationType.CANCELLATION:
-            lines.append(self._text(locale, "notifications.cancelled"))
+            lines.append(f"❌ {self._text(locale, 'notifications.cancelled')}")
             return "\n".join(lines)
         if entry.url is not None:
-            lines.append(entry.url)
+            lines.append(f"🔗 {entry.url}")
         if entry.changed_fields:
             labels = [
                 self._text(locale, f"notifications.fields.{field}")
@@ -215,6 +215,16 @@ class DigestRenderer:
 
     def _text(self, locale: Locale, key: str) -> str:
         return self._localizations.get(locale, key)
+
+
+def _telegram_length(value: str) -> int:
+    """Telegram limits message text in UTF-16 code units, where most emoji take two."""
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _truncate_telegram(value: str, limit: int) -> str:
+    # A surrogate pair cut in half is dropped rather than sent broken.
+    return value.encode("utf-16-le")[: limit * 2].decode("utf-16-le", errors="ignore")
 
 
 class OutboxService:

@@ -64,7 +64,10 @@ class AiogramFeedbackGateway:
         try:
             message = await self._bot.send_message(
                 chat_id=telegram_id,
-                text=f"{self._localizations.get(locale, 'feedback.admin_reply')}\n\n{body}",
+                text=(
+                    f"{self._localizations.get(locale, 'feedback.admin_reply')}\n\n{body}\n\n"
+                    f"{self._localizations.get(locale, 'feedback.reply_hint')}"
+                ),
             )
         except TelegramAPIError as error:
             raise normalize_telegram_error(error) from error
@@ -223,7 +226,7 @@ class FeedbackTelegramController:
             callback.message.chat.id if callback.message is not None else current_user.telegram_id
         )
         message_id = callback.message.message_id if callback.message is not None else None
-        screen = self._views.feedback_notice(current_user, "privacy.deleted")
+        screen = self._views.profile_deleted(current_user)
         await self._users.delete_profile(current_user.id)
         if callback.bot is None:
             return
@@ -239,6 +242,9 @@ class FeedbackTelegramController:
             reply_markup=screen.keyboard,
         )
 
+    async def cancel_draft(self, user: User) -> None:
+        await self._service.cancel(user.id)
+
     async def handle_message(self, message: Message, current_user: User) -> bool:
         draft = await self._service.draft(current_user.id)
         if message.text is not None and message.text.startswith("/"):
@@ -253,6 +259,7 @@ class FeedbackTelegramController:
                         current_user.id,
                         message.chat.id,
                         self._views.feedback_text_prompt(current_user),
+                        fresh=True,
                     )
                     return True
                 try:
@@ -264,12 +271,14 @@ class FeedbackTelegramController:
                         current_user.id,
                         message.chat.id,
                         self._views.feedback_text_invalid(current_user),
+                        fresh=True,
                     )
                     return True
                 await self._renderer.render(
                     current_user.id,
                     message.chat.id,
                     self._views.feedback_photo_prompt(current_user),
+                    fresh=True,
                 )
                 return True
             if draft.state == "photo":
@@ -278,6 +287,7 @@ class FeedbackTelegramController:
                         current_user.id,
                         message.chat.id,
                         self._views.feedback_photo_prompt(current_user),
+                        fresh=True,
                     )
                     return True
                 ready = await self._service.set_photo(current_user.id, message.photo[-1].file_id)
@@ -285,12 +295,14 @@ class FeedbackTelegramController:
                     current_user.id,
                     message.chat.id,
                     self._views.feedback_preview(current_user, ready),
+                    fresh=True,
                 )
                 return True
             await self._renderer.render(
                 current_user.id,
                 message.chat.id,
                 self._views.feedback_preview(current_user, draft),
+                fresh=True,
             )
             return True
 
@@ -311,7 +323,7 @@ class FeedbackTelegramController:
             await self._service.attach_admin_message(notification.ticket_id, chat_id, message_id)
         except TelegramSendError:
             pass
-        await message.answer(self._views.feedback_notice(current_user, "feedback.sent").text)
+        await message.answer(self._views.feedback_notice(current_user, "feedback.reply_sent").text)
         return True
 
     async def _render_callback(

@@ -79,11 +79,37 @@ def test_digest_renderer_splits_messages_and_keeps_delivery_mapping() -> None:
     chunks = renderer.render(entries, Locale.RU)
 
     assert len(chunks) == 3
-    assert all(len(chunk.text) <= 90 for chunk in chunks)
+    assert all(utf16_length(chunk.text) <= 90 for chunk in chunks)
     assert tuple(item for chunk in chunks for item in chunk.delivery_ids) == (10, 11, 12, 13)
-    assert chunks[0].text.startswith("Новые мероприятия")
-    assert chunks[-1].text.startswith("Важные изменения")
+    assert chunks[0].text.startswith("🆕 Новые мероприятия")
+    assert chunks[-1].text.startswith("✏️ Важные изменения")
     assert "Событие отменено" in chunks[-1].text
+
+
+def utf16_length(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def test_digest_limit_counts_telegram_utf16_units_for_emoji_titles() -> None:
+    renderer = DigestRenderer(
+        LocalizationCatalog.load(PROJECT_ROOT / "locales"),
+        timezone=ALMATY,
+        text_limit=90,
+    )
+    entry = DigestEntry(
+        event_id=1,
+        delivery_ids=(10,),
+        notification_type=NotificationType.NEW_EVENT,
+        title="🎉" * 80,
+        starts_at=utc(2030, 1, 1, 3),
+        changed_fields=(),
+    )
+
+    (chunk,) = renderer.render((entry,), Locale.RU)
+
+    assert len(chunk.text) <= 90 < utf16_length("🎉" * 80)
+    assert utf16_length(chunk.text) <= 90
+    chunk.text.encode("utf-8")  # raises on a surrogate pair cut in half
 
 
 def test_digest_entries_link_to_registration_but_not_cancellations() -> None:
@@ -114,5 +140,5 @@ def test_digest_entries_link_to_registration_but_not_cancellations() -> None:
 
     text = "\n".join(chunk.text for chunk in renderer.render(entries, Locale.RU))
 
-    assert "• Meetup\n01.01.2030 08:00\nhttps://share.kz/abc" in text
+    assert "• Meetup\n📅 01.01.2030 08:00\n🔗 https://share.kz/abc" in text
     assert "https://share.kz/old" not in text

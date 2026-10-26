@@ -151,7 +151,9 @@ async def test_start_and_locale_callback_flow_through_router_middleware(tmp_path
         await bot.session.close()
 
     assert renderer.render.await_count == 2
-    assert renderer.render.await_args_list[0].args[2].text == "Выберите язык интерфейса."
+    first = renderer.render.await_args_list[0]
+    assert first.args[2].text == "Выберите язык интерфейса.\nИнтерфейс тілін таңдаңыз."  # noqa: RUF001
+    assert first.kwargs == {"fresh": True}
     assert "Terricon Events Bot" in renderer.render.await_args_list[1].args[2].text
     users.set_locale.assert_awaited_once_with(1, Locale.KZ)
     assert current_user.locale is Locale.KZ
