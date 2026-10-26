@@ -1,6 +1,6 @@
 # План: гибридный источник и программы (2026-10-26)
 
-Статус: в работе (вариант C выбран пользователем 2026-10-26).
+Статус: завершён и выкачен 2026-10-26 (`b4102d9`).
 Спецификация: [`docs/specs/hybrid-source-programs.md`](../specs/hybrid-source-programs.md).
 
 ## 1. Схема — миграция `0012_hybrid_source`
@@ -118,3 +118,11 @@
 - `terricon-api-smoke`: 8/8 ok (6×`getAllEvents` 209 записей, 2×`eventsByStage` по 290).
 - Docker-образ собран под отдельным тегом `terricon-events-bot-app:hybrid-check`.
 - Новые KZ-строки (меню, программы, виды, подписка) переведены Claude — нужна проверка.
+
+## Выкатка 2026-10-26
+
+Backup `backups/terricon-20261026T172920255094783Z-213021.dump` (restore smoke OK на
+0011, 27 таблиц) → `docker compose build` → migrate 0011 → 0012 → preflight OK →
+`up -d app` (пользователь). Healthcheck true/true/true, api-smoke 8/8, 0 ошибок в логах.
+Первый цикл (sync_run 25): `stage`/`succeeded`/580 записей, 290 событий с `event_type`.
+Единственная domain change — `NEW_EVENT` неконференции 30.10 после её классификации.
