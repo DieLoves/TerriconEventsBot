@@ -53,7 +53,9 @@ docker run --detach \
 
 ready=false
 for _attempt in {1..30}; do
-    if docker exec "$container_name" pg_isready \
+    # The entrypoint first runs a socket-only bootstrap server before POSTGRES_DB
+    # exists; only the final server listens on TCP.
+    if docker exec "$container_name" pg_isready --host 127.0.0.1 \
         --username "$RESTORE_USER" --dbname "$RESTORE_DB" >/dev/null 2>&1; then
         ready=true
         break
