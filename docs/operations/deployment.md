@@ -29,7 +29,7 @@ BACKUP_DIR=/var/backups/terricon-events-bot ./scripts/backup.sh
 ## Проверка восстановления
 
 Проверка поднимает изолированный временный PostgreSQL 17 на `tmpfs`, восстанавливает архив,
-проверяет точный Alembic revision `0012_hybrid_source` и наличие не менее 26 публичных
+проверяет точный Alembic revision `0013_default_subscriptions` и наличие не менее 26 публичных
 таблиц, затем всегда удаляет контейнер. Production database и её volume не изменяются.
 
 Последний архив из `BACKUP_DIR`:
@@ -145,3 +145,14 @@ docker compose run --rm --no-deps -e ACCESS_MODE=public app terricon-preflight
 Только после успешного preflight изменить в `.env` одну настройку на `ACCESS_MODE=public` и
 пересоздать app через `docker compose up -d app`. Изменение кода или удаление database volume для
 перехода в public mode не требуется.
+
+## Подписка по умолчанию (2026-10-29)
+
+Миграция `0013_default_subscriptions` только с данными: каждому пользователю без
+подписки ставит «Все новые мероприятия». Backup перед ней проверяется по прежней ревизии:
+
+```bash
+EXPECTED_SCHEMA_REVISION=0012_hybrid_source ./scripts/restore-smoke.sh "$backup_path"
+```
+
+Downgrade ничего не делает — подписки по умолчанию неотличимы от выбранных вручную.

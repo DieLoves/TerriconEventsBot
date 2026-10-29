@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from terricon_events_bot.application.users import TelegramPrincipal, UserService
 from terricon_events_bot.domain.enums import AccessMode, Locale
 from terricon_events_bot.infrastructure.database import create_engine, create_session_factory
-from terricon_events_bot.infrastructure.models import BetaAllowlistEntry, User
+from terricon_events_bot.infrastructure.models import (
+    BetaAllowlistEntry,
+    SubscriptionSettings,
+    User,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -166,3 +170,42 @@ async def test_startup_access_reconciliation_follows_current_configuration(
         )
     assert readded == 1
     assert granted == {100: False, 200: True, 300: False, 400: True}
+
+
+@pytest.mark.asyncio
+async def test_new_user_is_subscribed_to_all_once(
+    user_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = user_database
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(User(telegram_id=600, access_granted=True))
+    users = service(session_factory, mode=AccessMode.PUBLIC)
+    principal = TelegramPrincipal(700, None, None)
+
+    contexts = await asyncio.gather(users.resolve(principal), users.resolve(principal))
+    existing = await users.resolve(TelegramPrincipal(600, None, None))
+    assert existing is not None and all(context is not None for context in contexts)
+
+    async with session_factory() as session:
+        subscribed = dict(
+            (
+                await session.execute(
+                    select(User.telegram_id, SubscriptionSettings.subscribe_all).join(
+                        SubscriptionSettings, SubscriptionSettings.user_id == User.id
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+    assert subscribed == {700: True}
+
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(text("DELETE FROM subscription_settings"))
+    await users.resolve(principal)
+
+    async with session_factory() as session:
+        remaining = await session.scalar(select(func.count()).select_from(SubscriptionSettings))
+    assert remaining == 0

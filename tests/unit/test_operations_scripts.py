@@ -70,7 +70,7 @@ case "$*" in
     run*) printf 'container-id\\n' ;;
     *pg_isready*) exit 0 ;;
     *pg_restore*) exit 0 ;;
-    *version_num*) printf '0012_hybrid_source\\n' ;;
+    *version_num*) printf '0013_default_subscriptions\\n' ;;
     *information_schema.tables*) printf '26\\n' ;;
     'rm --force'*) exit 0 ;;
     *) exit 2 ;;
@@ -88,7 +88,7 @@ esac
     output = run_script("restore-smoke.sh", env=env, argument=str(archive))
 
     calls = log_path.read_text(encoding="utf-8")
-    assert output == "Restore smoke OK: revision 0012_hybrid_source, public tables 26."
+    assert output == "Restore smoke OK: revision 0013_default_subscriptions, public tables 26."
     assert "run --detach" in calls
     assert "pg_restore --exit-on-error" in calls
     assert "rm --force terricon-restore-smoke-" in calls
@@ -119,4 +119,4 @@ esac
     with pytest.raises(subprocess.CalledProcessError) as caught:
         run_script("restore-smoke.sh", env=env, argument=str(archive))
 
-    assert "expected 0012_hybrid_source" in caught.value.stderr
+    assert "expected 0013_default_subscriptions" in caught.value.stderr

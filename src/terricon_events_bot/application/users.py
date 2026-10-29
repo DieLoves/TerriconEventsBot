@@ -22,6 +22,7 @@ from terricon_events_bot.infrastructure.models import (
     BroadcastDelivery,
     FeedbackTicket,
     FsmState,
+    SubscriptionSettings,
     User,
 )
 
@@ -78,20 +79,35 @@ class UserService:
                     access_granted=True,
                     last_active_at=now,
                 )
-                user = await session.scalar(
-                    statement.on_conflict_do_update(
-                        index_elements=[User.telegram_id],
-                        set_={
-                            "username": statement.excluded.username,
-                            "display_name": statement.excluded.display_name,
-                            "is_active": True,
-                            "access_granted": True,
-                            "last_active_at": now,
-                        },
-                    ).returning(User)
-                )
-                if user is None:
+                row = (
+                    await session.execute(
+                        statement.on_conflict_do_update(
+                            index_elements=[User.telegram_id],
+                            set_={
+                                "username": statement.excluded.username,
+                                "display_name": statement.excluded.display_name,
+                                "is_active": True,
+                                "access_granted": True,
+                                "last_active_at": now,
+                            },
+                        ).returning(
+                            User,
+                            # created_at defaults to now(), the transaction start time.
+                            (User.created_at == func.now()).label("created"),
+                        )
+                    )
+                ).one_or_none()
+                if row is None:
                     raise RuntimeError("User upsert did not return a persisted user")
+                user, created = row
+                if created:
+                    # New users start subscribed to all events; an explicit unsubscribe
+                    # later is kept because existing users are never resubscribed here.
+                    await session.execute(
+                        pg_insert(SubscriptionSettings)
+                        .values(user_id=user.id, subscribe_all=True)
+                        .on_conflict_do_nothing()
+                    )
                 return UserContext(user=user, is_admin=is_admin)
 
     async def reconcile_access(self) -> int:

@@ -274,6 +274,76 @@ async def test_localized_details_url_migration_preserves_existing_value(
 
 
 @pytest.mark.asyncio
+async def test_default_subscription_migration_subscribes_only_unsubscribed_users(
+    migrated_database_url: str,
+    alembic_runner: Callable[..., None],
+) -> None:
+    await asyncio.to_thread(alembic_runner, command.downgrade, "0012_hybrid_source")
+
+    engine = create_async_engine(migrated_database_url)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("INSERT INTO users (telegram_id) VALUES (3000001), (3000002), (3000003)")
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO subscription_settings (user_id, subscribe_all) "
+                    "SELECT id, false FROM users WHERE telegram_id = 3000002"
+                )
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO subscription_categories (user_id, category) "
+                    "SELECT id, 'ai_data' FROM users WHERE telegram_id = 3000002"
+                )
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO subscription_settings (user_id, subscribe_all) "
+                    "SELECT id, true FROM users WHERE telegram_id = 3000003"
+                )
+            )
+    finally:
+        await engine.dispose()
+
+    try:
+        await asyncio.to_thread(alembic_runner, command.upgrade, "head")
+        engine = create_async_engine(migrated_database_url)
+        try:
+            async with engine.connect() as connection:
+                settings = await connection.execute(
+                    text(
+                        "SELECT u.telegram_id, s.subscribe_all FROM users u "
+                        "JOIN subscription_settings s ON s.user_id = u.id "
+                        "WHERE u.telegram_id BETWEEN 3000001 AND 3000003"
+                    )
+                )
+                categories = await connection.execute(
+                    text(
+                        "SELECT u.telegram_id, c.category::text FROM users u "
+                        "JOIN subscription_categories c ON c.user_id = u.id "
+                        "WHERE u.telegram_id BETWEEN 3000001 AND 3000003"
+                    )
+                )
+
+            assert dict(settings.tuples().all()) == {
+                3000001: True,
+                3000002: False,
+                3000003: True,
+            }
+            assert categories.tuples().all() == [(3000002, "ai_data")]
+        finally:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM users WHERE telegram_id BETWEEN 3000001 AND 3000003")
+                )
+            await engine.dispose()
+    finally:
+        await asyncio.to_thread(alembic_runner, command.upgrade, "head")
+
+
+@pytest.mark.asyncio
 async def test_postgresql_enums_round_trip_as_domain_enum_members(
     migrated_database_url: str,
 ) -> None:

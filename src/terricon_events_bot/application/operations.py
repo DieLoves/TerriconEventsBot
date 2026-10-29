@@ -23,7 +23,7 @@ from terricon_events_bot.infrastructure.models import (
 
 T = TypeVar("T")
 APP_HEARTBEAT_NAME = "terricon-events-bot"
-SCHEMA_REVISION = "0012_hybrid_source"
+SCHEMA_REVISION = "0013_default_subscriptions"
 _PROLONGED_QUEUE_AGE = timedelta(hours=1)
 _OPERATIONAL_ALERT_KINDS = frozenset(
     {
