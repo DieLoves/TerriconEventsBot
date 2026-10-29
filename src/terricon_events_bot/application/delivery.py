@@ -281,18 +281,20 @@ class OutboxService:
                 )
                 if not changes:
                     return MaterializeResult(0, 0, 0)
-                ended_event_ids = await self._ended_event_ids(
+                ended_event_ids, started_event_ids = await self._past_event_ids(
                     session, {change.event_id for change in changes}, now
                 )
                 inserted = 0
                 for change in changes:
-                    # Source updates after the event day (recording links, archive
-                    # cleanup) are not actionable for subscribers.
-                    recipient_ids = (
-                        ()
-                        if change.event_id in ended_event_ids
-                        else await self._recipient_ids(session, change)
+                    # Source updates once the event has started (recording links, archive
+                    # cleanup) are not actionable for subscribers. A new event stays
+                    # current until the end of its local day, like in the catalog.
+                    silenced = change.event_id in (
+                        started_event_ids
+                        if change.notification_type is not NotificationType.NEW_EVENT
+                        else ended_event_ids
                     )
+                    recipient_ids = () if silenced else await self._recipient_ids(session, change)
                     if recipient_ids:
                         for offset in range(0, len(recipient_ids), _INSERT_BATCH_SIZE):
                             batch = recipient_ids[offset : offset + _INSERT_BATCH_SIZE]
@@ -337,22 +339,26 @@ class OutboxService:
                         outboxes += 1
                 return MaterializeResult(len(changes), inserted, outboxes)
 
-    async def _ended_event_ids(
+    async def _past_event_ids(
         self, session: AsyncSession, event_ids: set[int], now: datetime
-    ) -> set[int]:
-        # Same rule as the catalog: an event is current until the end of its local day.
+    ) -> tuple[set[int], set[int]]:
+        """Return events whose local day has ended and events that have started."""
         timezone = self._quiet_hours.timezone
         today_start = datetime.combine(now.astimezone(timezone).date(), time.min, timezone)
-        return set(
-            (
-                await session.scalars(
-                    select(Event.id).where(
-                        Event.id.in_(event_ids),
-                        Event.starts_at < today_start.astimezone(UTC),
-                    )
+        rows = (
+            await session.execute(
+                select(Event.id, Event.starts_at).where(
+                    Event.id.in_(event_ids), Event.starts_at <= now
                 )
-            ).all()
-        )
+            )
+        ).tuples()
+        started: set[int] = set()
+        ended: set[int] = set()
+        for event_id, starts_at in rows:
+            started.add(event_id)
+            if starts_at < today_start:
+                ended.add(event_id)
+        return ended, started
 
     async def _recipient_ids(self, session: AsyncSession, change: DomainChange) -> tuple[int, ...]:
         event_type = await session.scalar(

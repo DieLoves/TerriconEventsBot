@@ -341,7 +341,7 @@ async def test_materialization_skips_changes_for_events_that_already_ended(
         session_factory, 5100201, "Yesterday event", datetime(2030, 1, 9, 12, tzinfo=UTC)
     )
     today = await add_event(
-        session_factory, 5100202, "Morning event", datetime(2030, 1, 10, 3, tzinfo=UTC)
+        session_factory, 5100202, "Evening event", datetime(2030, 1, 10, 13, tzinfo=UTC)
     )
     skipped_changes = [
         await add_change(
@@ -380,6 +380,66 @@ async def test_materialization_skips_changes_for_events_that_already_ended(
 
     assert result.changes == 4
     assert [(item.user_id, item.event_id) for item in deliveries] == [(user_id, today)]
+    assert all(change.materialized_at == clock.now() for change in skipped)
+
+
+@pytest.mark.asyncio
+async def test_materialization_skips_updates_for_events_that_already_started(
+    delivery_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, session_factory = delivery_database
+    user_id = await add_user(session_factory, 4100202, SubscriptionMode.ALL)
+    # 2030-01-10 22:30 Almaty: the 19:00 event is over, but its day is not.
+    clock = FrozenClock(datetime(2030, 1, 10, 17, 30, tzinfo=UTC))
+    started = await add_event(
+        session_factory, 5100203, "Evening stream", datetime(2030, 1, 10, 14, tzinfo=UTC)
+    )
+    late = await add_event(
+        session_factory, 5100204, "Late event", datetime(2030, 1, 10, 18, tzinfo=UTC)
+    )
+    skipped_changes = [
+        await add_change(
+            session_factory,
+            started,
+            revision,
+            notification_type,
+            new_categories=(CategorySlug.AI_DATA,),
+            change_data={"registration_url": {"old": "https://a.example/", "new": None}},
+        )
+        for revision, notification_type in (
+            (2, NotificationType.IMPORTANT_CHANGE),
+            (3, NotificationType.CANCELLATION),
+        )
+    ]
+    await add_change(
+        session_factory,
+        started,
+        1,
+        NotificationType.NEW_EVENT,
+        new_categories=(CategorySlug.AI_DATA,),
+    )
+    await add_change(
+        session_factory,
+        late,
+        2,
+        NotificationType.IMPORTANT_CHANGE,
+        new_categories=(CategorySlug.AI_DATA,),
+        change_data={"address": {"old": "A", "new": "B"}},
+    )
+
+    result = await outbox_service(session_factory, clock).materialize()
+
+    async with session_factory() as session:
+        deliveries = (await session.scalars(select(NotificationDelivery))).all()
+        skipped = (
+            await session.scalars(select(DomainChange).where(DomainChange.id.in_(skipped_changes)))
+        ).all()
+
+    assert result.changes == 4
+    assert sorted((item.user_id, item.event_id, item.notification_type) for item in deliveries) == [
+        (user_id, started, NotificationType.NEW_EVENT),
+        (user_id, late, NotificationType.IMPORTANT_CHANGE),
+    ]
     assert all(change.materialized_at == clock.now() for change in skipped)
 
 
