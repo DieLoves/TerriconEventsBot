@@ -233,6 +233,19 @@ async def test_catalog_paginates_clamps_and_reports_stale_data(
     assert result.pages == 3 and result.page == 3
     assert [item.title for item in result.items] == ["Event 14"]
     assert result.stale
+    upcoming = CatalogFilter.default(CatalogSection.UPCOMING)
+    pages = []
+    for item_page in range(1, 4):
+        listed = await query.list(upcoming, Locale.RU, item_page, now=NOW)
+        pages.extend((item.id, item_page) for item in listed.items)
+    assert [
+        (await query.locate(upcoming, event_id, now=NOW), expected) for event_id, expected in pages
+    ] == [(expected, expected) for _, expected in pages]
+    assert (
+        await query.locate(CatalogFilter.default(CatalogSection.ARCHIVE), pages[0][0], now=NOW)
+        is None
+    )
+    assert await query.locate(upcoming, 0, now=NOW) is None
 
 
 @pytest.mark.asyncio

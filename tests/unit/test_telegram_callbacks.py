@@ -36,6 +36,7 @@ from terricon_events_bot.telegram.callbacks import (
     NavigationCallback,
     NavigationView,
     NoopCallback,
+    NotificationEventCallback,
     SubscriptionAllCallback,
     SubscriptionCategoryCallback,
 )
@@ -60,6 +61,7 @@ def test_callback_contracts_round_trip_stable_codes_and_fit_telegram_limit() -> 
             list_page=99,
             content_page=99,
         ),
+        NotificationEventCallback(event_id=9_223_372_036_854_775_807),
         SubscriptionAllCallback(),
         SubscriptionCategoryCallback(category=CategorySlug.SOFT_SKILLS_LANGUAGES),
         FeedbackKindCallback(kind=FeedbackKind.ERROR),

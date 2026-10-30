@@ -22,6 +22,7 @@ from terricon_events_bot.domain.catalog import (
     CatalogScope,
     CatalogSection,
     CatalogState,
+    EventDetails,
     EventLanguage,
     EventSummary,
 )
@@ -43,6 +44,7 @@ from terricon_events_bot.telegram.callbacks import (
     EventCallback,
     NavigationCallback,
     NavigationView,
+    NotificationEventCallback,
     ProgramKindCallback,
     SubscriptionCategoryCallback,
 )
@@ -361,3 +363,112 @@ async def test_program_subscription_toggle_renders_new_summary(tmp_path: Path) -
         for row in renderer.render.await_args.args[2].keyboard.inline_keyboard
         for button in row
     ]
+
+
+def details(event_id: int = 1, event_type: str | None = None) -> EventDetails:
+    return EventDetails(
+        id=event_id,
+        title="Notified event",
+        description="About",
+        audience=None,
+        speaker=None,
+        details_url=None,
+        starts_at=datetime(2030, 1, 1, tzinfo=UTC),
+        event_format=EventFormat.OFFLINE,
+        event_languages=("ru",),
+        address=None,
+        registration_url=None,
+        recording_url=None,
+        poster_url=None,
+        is_available=True,
+        categories=(CategorySlug.DEVELOPMENT_IT,),
+        locale=Locale.RU,
+        translation_source=TranslationSource.OFFICIAL,
+        event_type=event_type,
+    )
+
+
+@pytest.mark.asyncio
+async def test_notification_button_opens_event_card_below_in_the_saved_list(
+    tmp_path: Path,
+) -> None:
+    handler, _, catalog, state_store, renderer = controller(tmp_path)
+    saved = CatalogState(
+        replace(
+            CatalogFilter.default(CatalogSection.UPCOMING),
+            category=CategorySlug.DEVELOPMENT_IT,
+        ),
+        page=3,
+    )
+    state_store.load.return_value = saved
+    catalog.get.return_value = details()
+    catalog.locate = AsyncMock(return_value=2)
+    catalog.list.return_value = replace(page(event_id=1), page=2, pages=2, total=2)
+    catalog.adjacent_ids = AsyncMock(return_value=(7, None))
+
+    await handler.open_notification_event(
+        cast(CallbackQuery, FakeCallback()),
+        NotificationEventCallback(event_id=1),
+        current_user(),
+    )
+
+    assert state_store.save.await_args.args[1] == replace(saved, page=2)
+    state_store.switch.assert_not_awaited()
+    screen = renderer.render.await_args.args[2]
+    assert renderer.render.await_args.kwargs == {"fresh": True}
+    assert "Notified event" in screen.text
+    callbacks = [button.callback_data for row in screen.keyboard.inline_keyboard for button in row]
+    assert EventCallback(event_id=7, action=EventAction.CARD, list_page=1).pack() in callbacks
+
+
+@pytest.mark.asyncio
+async def test_notification_button_falls_back_to_all_events_or_programs(tmp_path: Path) -> None:
+    handler, _, catalog, state_store, renderer = controller(tmp_path)
+    filtered = CatalogState(
+        replace(CatalogFilter.default(CatalogSection.UPCOMING), category=CategorySlug.AI_DATA)
+    )
+    state_store.load.return_value = filtered
+    state_store.switch.return_value = CatalogState(
+        CatalogFilter.default(CatalogSection.UPCOMING, CatalogScope.PROGRAMS)
+    )
+    catalog.list.return_value = page(event_id=1)
+    catalog.adjacent_ids = AsyncMock(return_value=(None, None))
+
+    catalog.get.return_value = details()
+    catalog.locate = AsyncMock(side_effect=[None, None, 1])
+    await handler.open_notification_event(
+        cast(CallbackQuery, FakeCallback()), NotificationEventCallback(event_id=1), current_user()
+    )
+    assert state_store.save.await_args.args[1] == CatalogState(
+        CatalogFilter.default(CatalogSection.ARCHIVE)
+    )
+
+    catalog.get.return_value = details(event_type="accelerator")
+    catalog.locate = AsyncMock(return_value=1)
+    await handler.open_notification_event(
+        cast(CallbackQuery, FakeCallback()), NotificationEventCallback(event_id=1), current_user()
+    )
+    state_store.switch.assert_awaited_once_with(1, CatalogScope.PROGRAMS)
+    assert state_store.save.await_args.args[1].filters.scope is CatalogScope.PROGRAMS
+    assert renderer.render.await_args.kwargs == {"fresh": True}
+
+
+@pytest.mark.asyncio
+async def test_notification_button_for_a_removed_event_explains_it_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    handler, _, catalog, state_store, renderer = controller(tmp_path)
+    state_store.load.return_value = CatalogState(CatalogFilter.default(CatalogSection.UPCOMING))
+    catalog.locate = AsyncMock(return_value=None)
+
+    for event in (None, details()):
+        catalog.get.return_value = event
+        await handler.open_notification_event(
+            cast(CallbackQuery, FakeCallback()),
+            NotificationEventCallback(event_id=1),
+            current_user(),
+        )
+        assert "больше недоступно" in renderer.render.await_args.args[2].text
+        assert renderer.render.await_args.kwargs == {"fresh": True}
+
+    state_store.save.assert_not_awaited()

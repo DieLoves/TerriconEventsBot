@@ -145,6 +145,12 @@ class EventCallback(CallbackData, prefix="ev"):
     content_page: int = 1
 
 
+class NotificationEventCallback(CallbackData, prefix="ne"):
+    """Opens an event card from a notification digest message."""
+
+    event_id: int
+
+
 class SettingLocaleCallback(CallbackData, prefix="sl"):
     locale: Locale
 

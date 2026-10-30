@@ -14,8 +14,11 @@ from terricon_events_bot.domain.catalog import (
     CatalogFilter,
     CatalogPage,
     CatalogScope,
+    CatalogSection,
     CatalogState,
+    EventDetails,
 )
+from terricon_events_bot.domain.event_kinds import is_program
 from terricon_events_bot.infrastructure.models import User
 from terricon_events_bot.telegram.callbacks import (
     CatalogAllCallback,
@@ -38,6 +41,7 @@ from terricon_events_bot.telegram.callbacks import (
     NavigationCallback,
     NavigationView,
     NoopCallback,
+    NotificationEventCallback,
     ProgramKindAllCallback,
     ProgramKindCallback,
     SettingLocaleCallback,
@@ -440,6 +444,62 @@ class TelegramController:
     async def unknown_callback(self, callback: CallbackQuery, current_user: User) -> None:
         await self._show_invalid(callback, current_user)
 
+    async def open_notification_event(
+        self,
+        callback: CallbackQuery,
+        callback_data: NotificationEventCallback,
+        current_user: User,
+    ) -> None:
+        """Open the event card from a notification below the digest message."""
+        await self._answer(callback)
+        if not current_user.onboarding_completed:
+            await self._render_fresh(callback, current_user, self._views.onboarding_language())
+            return
+        event = await self._catalog.get(callback_data.event_id, current_user.locale)
+        state = await self._notification_state(current_user, event) if event is not None else None
+        located = (
+            await self._event_page(state, current_user, callback_data.event_id, state.page)
+            if event is not None and state is not None
+            else None
+        )
+        if event is None or state is None or located is None:
+            await self._render_fresh(
+                callback, current_user, self._views.event_unavailable(current_user)
+            )
+            return
+        page, position = located
+        await self._catalog_state.save(current_user.id, state)
+        previous, following = await self._adjacent_events(state, current_user, page, position)
+        await self._render_fresh(
+            callback,
+            current_user,
+            self._views.event_card(
+                current_user,
+                state,
+                event,
+                page=page.page,
+                previous=previous,
+                following=following,
+            ),
+        )
+
+    async def _notification_state(self, user: User, event: EventDetails) -> CatalogState | None:
+        """Keep the user's list if it shows the event, else fall back to all events."""
+        scope = CatalogScope.PROGRAMS if is_program(event.event_type) else CatalogScope.EVENTS
+        current = await self._catalog_state.load(user.id)
+        if current.filters.scope is not scope:
+            current = await self._catalog_state.switch(user.id, scope)
+        candidates = (
+            current,
+            CatalogState(CatalogFilter.default(CatalogSection.UPCOMING, scope)),
+            CatalogState(CatalogFilter.default(CatalogSection.ARCHIVE, scope)),
+        )
+        for candidate in candidates:
+            page = await self._catalog.locate(candidate.filters, event.id)
+            if page is not None:
+                return replace(candidate, page=page)
+        return None
+
     async def _show_catalog(
         self,
         callback: CallbackQuery,
@@ -536,6 +596,12 @@ class TelegramController:
         # A typed message pushes the old screen up the history; show a fresh one below it.
         await self._renderer.render(user.id, message.chat.id, screen, fresh=True)
 
+    async def _render_fresh(self, callback: CallbackQuery, user: User, screen: Screen) -> None:
+        # The tap came from a notification, not the bot screen: show the screen below it.
+        if callback.message is None:
+            return
+        await self._renderer.render(user.id, callback.message.chat.id, screen, fresh=True)
+
     async def _render_callback(self, callback: CallbackQuery, user: User, screen: Screen) -> None:
         if callback.message is None:
             return
@@ -593,6 +659,9 @@ def build_user_router(
     router.callback_query.register(controller.select_all_programs, ProgramKindAllCallback.filter())
     router.callback_query.register(controller.select_page, CatalogPageCallback.filter())
     router.callback_query.register(controller.show_event, EventCallback.filter())
+    router.callback_query.register(
+        controller.open_notification_event, NotificationEventCallback.filter()
+    )
     router.callback_query.register(controller.set_locale, SettingLocaleCallback.filter())
     router.callback_query.register(controller.toggle_setting, SettingToggleCallback.filter())
     router.callback_query.register(

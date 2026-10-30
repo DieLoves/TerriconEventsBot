@@ -110,6 +110,7 @@ notifications:
   important_changes: "Маңызды өзгерістер"
   cancelled: "Іс-шара өтпейді немесе енді қолжетімсіз."
   changed: "Өзгерді"
+  open_event: "Ботта ашу"
   fields:
     address: "мекенжайы"
     format: "форматы"

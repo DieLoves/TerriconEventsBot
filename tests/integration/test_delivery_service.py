@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import cast
@@ -15,6 +15,7 @@ from terricon_events_bot.application.delivery import (
     Clock,
     DeliveryWorker,
     DigestRenderer,
+    EventButton,
     OutboxService,
     QuietHours,
     TelegramSendError,
@@ -67,10 +68,14 @@ class FakeGateway:
     def __init__(self, outcomes: list[int | TelegramSendError] | None = None) -> None:
         self.outcomes = list(outcomes or [])
         self.calls: list[tuple[int, str]] = []
+        self.buttons: list[tuple[EventButton, ...]] = []
         self._next_message_id = 1000
 
-    async def send_message(self, telegram_id: int, message: str) -> int:
+    async def send_message(
+        self, telegram_id: int, message: str, buttons: Sequence[EventButton] = ()
+    ) -> int:
         self.calls.append((telegram_id, message))
+        self.buttons.append(tuple(buttons))
         if self.outcomes:
             outcome = self.outcomes.pop(0)
             if isinstance(outcome, TelegramSendError):
@@ -81,9 +86,11 @@ class FakeGateway:
 
 
 class SlowGateway(FakeGateway):
-    async def send_message(self, telegram_id: int, message: str) -> int:
+    async def send_message(
+        self, telegram_id: int, message: str, buttons: Sequence[EventButton] = ()
+    ) -> int:
         await asyncio.sleep(0.05)
-        return await super().send_message(telegram_id, message)
+        return await super().send_message(telegram_id, message, buttons)
 
 
 @pytest.fixture
@@ -532,6 +539,7 @@ async def test_worker_resumes_after_transient_failure_without_resending_acked_ch
     _, session_factory = delivery_database
     await add_user(session_factory, 4100007, SubscriptionMode.ALL)
     clock = FrozenClock(datetime(2030, 1, 1, 7, tzinfo=UTC))
+    event_ids = []
     for offset, letter in enumerate(("A", "B"), start=1):
         event_id = await add_event(
             session_factory,
@@ -539,6 +547,7 @@ async def test_worker_resumes_after_transient_failure_without_resending_acked_ch
             letter * 60,
             datetime(2030, 1, 5 + offset, tzinfo=UTC),
         )
+        event_ids.append(event_id)
         await add_change(
             session_factory,
             event_id,
@@ -567,6 +576,12 @@ async def test_worker_resumes_after_transient_failure_without_resending_acked_ch
     assert len(gateway.calls) == 3
     assert gateway.calls[0][1] != gateway.calls[1][1]
     assert gateway.calls[1][1] == gateway.calls[2][1]
+    # Every new event gets its own "open in bot" button, kept across retries.
+    assert gateway.buttons == [
+        (EventButton(event_ids[0], "📋 Открыть в боте"),),
+        (EventButton(event_ids[1], "📋 Открыть в боте"),),
+        (EventButton(event_ids[1], "📋 Открыть в боте"),),
+    ]
     assert outbox is not None
     assert outbox.status is DeliveryStatus.SENT
     assert outbox.telegram_message_ids == [101, 102]

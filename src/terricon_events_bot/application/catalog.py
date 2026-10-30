@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import exists, func, or_, select
@@ -71,11 +72,7 @@ class CatalogQuery:
             )
             pages = max(1, (total + self._page_size - 1) // self._page_size)
             selected_page = min(page, pages)
-            order = (
-                (Event.starts_at.asc(), Event.id.asc())
-                if filters.section is CatalogSection.UPCOMING
-                else (Event.starts_at.desc(), Event.id.desc())
-            )
+            order = self._order(filters)
             rows = (
                 await session.execute(
                     select(Event, preferred, fallback)
@@ -188,11 +185,7 @@ class CatalogQuery:
         if event_id <= 0:
             return None
         current = self._normalize_now(now or datetime.now(UTC))
-        order = (
-            (Event.starts_at.asc(), Event.id.asc())
-            if filters.section is CatalogSection.UPCOMING
-            else (Event.starts_at.desc(), Event.id.desc())
-        )
+        order = self._order(filters)
         ordered = (
             select(
                 Event.id.label("event_id"),
@@ -217,6 +210,39 @@ class CatalogQuery:
             int(previous_id) if previous_id is not None else None,
             int(following_id) if following_id is not None else None,
         )
+
+    async def locate(
+        self,
+        filters: CatalogFilter,
+        event_id: int,
+        *,
+        now: datetime | None = None,
+    ) -> int | None:
+        """Return the list page that shows ``event_id`` under ``filters``."""
+        if event_id <= 0:
+            return None
+        current = self._normalize_now(now or datetime.now(UTC))
+        ordered = (
+            select(
+                Event.id.label("event_id"),
+                func.row_number().over(order_by=self._order(filters)).label("position"),
+            )
+            .where(*self._conditions(filters, current))
+            .subquery()
+        )
+        async with self._session_factory() as session:
+            position = await session.scalar(
+                select(ordered.c.position).where(ordered.c.event_id == event_id)
+            )
+        if position is None:
+            return None
+        return (int(position) - 1) // self._page_size + 1
+
+    @staticmethod
+    def _order(filters: CatalogFilter) -> tuple[ColumnElement[Any], ...]:
+        if filters.section is CatalogSection.UPCOMING:
+            return (Event.starts_at.asc(), Event.id.asc())
+        return (Event.starts_at.desc(), Event.id.desc())
 
     def _conditions(self, filters: CatalogFilter, now: datetime) -> tuple[ColumnElement[bool], ...]:
         today = now.astimezone(self._timezone).date()

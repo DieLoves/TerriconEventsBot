@@ -110,6 +110,7 @@ notifications:
   important_changes: "Важные изменения"
   cancelled: "Событие отменено или больше недоступно."
   changed: "Изменено"
+  open_event: "Открыть в боте"
   fields:
     address: "адрес"
     format: "формат"

@@ -12,7 +12,7 @@ from aiogram.exceptions import (
 )
 from aiogram.methods import SendMessage
 
-from terricon_events_bot.application.delivery import TelegramSendError
+from terricon_events_bot.application.delivery import EventButton, TelegramSendError
 from terricon_events_bot.telegram.delivery import AiogramTelegramGateway
 
 
@@ -86,3 +86,19 @@ async def test_retry_after_is_bounded_before_timedelta_conversion() -> None:
         await gateway.send_message(100, "message")
 
     assert captured.value.retry_after == timedelta(days=1)
+
+
+@pytest.mark.asyncio
+async def test_gateway_attaches_event_buttons_only_when_present() -> None:
+    bot = Mock(spec=Bot)
+    bot.send_message = AsyncMock(return_value=Mock(message_id=7))
+    gateway = AiogramTelegramGateway(cast(Any, bot))
+
+    await gateway.send_message(100, "digest", (EventButton(42, "📋 Открыть в боте"),))
+    await gateway.send_message(100, "plain")
+
+    keyboard = bot.send_message.await_args_list[0].kwargs["reply_markup"]
+    assert [
+        [(item.text, item.callback_data) for item in row] for row in keyboard.inline_keyboard
+    ] == [[("📋 Открыть в боте", "ne:42")]]
+    assert bot.send_message.await_args_list[1].kwargs["reply_markup"] is None

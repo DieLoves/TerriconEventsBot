@@ -45,6 +45,8 @@ from terricon_events_bot.localization import LocalizationCatalog
 _TELEGRAM_TEXT_LIMIT = 4096
 _SAFE_TEXT_LIMIT = 4000
 _TITLE_LIMIT = 500
+# Telegram shows roughly this many characters of an inline button label.
+_BUTTON_TITLE_LIMIT = 40
 _DEFAULT_LEASE = timedelta(minutes=5)
 _INSERT_BATCH_SIZE = 1000
 
@@ -59,7 +61,9 @@ class SystemClock:
 
 
 class TelegramGateway(Protocol):
-    async def send_message(self, telegram_id: int, text: str) -> int: ...
+    async def send_message(
+        self, telegram_id: int, text: str, buttons: Sequence[EventButton] = ()
+    ) -> int: ...
 
 
 class TelegramSendError(Exception):
@@ -118,9 +122,18 @@ class DigestEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class EventButton:
+    """Inline button under a digest message that opens the event card in the bot."""
+
+    event_id: int
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
 class DigestChunk:
     text: str
     delivery_ids: tuple[int, ...]
+    buttons: tuple[EventButton, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,21 +187,48 @@ class DigestRenderer:
                 continue
             current_lines = [header]
             current_ids: list[int] = []
+            current_items: list[DigestEntry] = []
             for item in items:
                 entry = self._entry_text(item, locale)
                 candidate = "\n\n".join((*current_lines, entry))
                 if _telegram_length(candidate) > self._text_limit and len(current_lines) > 1:
-                    chunks.append(DigestChunk("\n\n".join(current_lines), tuple(current_ids)))
+                    chunks.append(self._chunk(current_lines, current_ids, current_items, locale))
                     current_lines = [header]
                     current_ids = []
+                    current_items = []
                     candidate = "\n\n".join((header, entry))
                 if _telegram_length(candidate) > self._text_limit:
                     allowed = max(self._text_limit - _telegram_length(header) - 2, 1)
                     entry = _truncate_telegram(entry, allowed)
                 current_lines.append(entry)
                 current_ids.extend(item.delivery_ids)
-            chunks.append(DigestChunk("\n\n".join(current_lines), tuple(current_ids)))
+                current_items.append(item)
+            chunks.append(self._chunk(current_lines, current_ids, current_items, locale))
         return tuple(chunks)
+
+    def _chunk(
+        self,
+        lines: Sequence[str],
+        delivery_ids: Sequence[int],
+        items: Sequence[DigestEntry],
+        locale: Locale,
+    ) -> DigestChunk:
+        return DigestChunk("\n\n".join(lines), tuple(delivery_ids), self._buttons(items, locale))
+
+    def _buttons(self, items: Sequence[DigestEntry], locale: Locale) -> tuple[EventButton, ...]:
+        new_events = [
+            item for item in items if item.notification_type is NotificationType.NEW_EVENT
+        ]
+        if len(new_events) == 1:
+            label = f"📋 {self._text(locale, 'notifications.open_event')}"
+            return (EventButton(new_events[0].event_id, label),)
+        buttons = []
+        for item in new_events:
+            title = " ".join(item.title.split())
+            if len(title) > _BUTTON_TITLE_LIMIT:
+                title = title[: _BUTTON_TITLE_LIMIT - 1].rstrip() + "…"
+            buttons.append(EventButton(item.event_id, f"📋 {title}"))
+        return tuple(buttons)
 
     def _entry_text(self, entry: DigestEntry, locale: Locale) -> str:
         title = " ".join(entry.title.split())[:_TITLE_LIMIT]
@@ -480,7 +520,12 @@ class OutboxService:
             "version": 1,
             "locale": user.locale.value,
             "chunks": [
-                {"text": chunk.text, "delivery_ids": list(chunk.delivery_ids)} for chunk in chunks
+                {
+                    "text": chunk.text,
+                    "delivery_ids": list(chunk.delivery_ids),
+                    "buttons": [[button.event_id, button.label] for button in chunk.buttons],
+                }
+                for chunk in chunks
             ],
         }
         return created
@@ -676,7 +721,9 @@ class DeliveryWorker:
                 return "failed"
         for chunk in chunks[sent_count:]:
             try:
-                message_id = await self._gateway.send_message(telegram_id, chunk.text)
+                message_id = await self._gateway.send_message(
+                    telegram_id, chunk.text, chunk.buttons
+                )
             except TelegramSendError as error:
                 if error.blocked:
                     await self._block_user(outbox.user_id, error.code)
@@ -708,7 +755,25 @@ class DeliveryWorker:
                 or any(not isinstance(item, int) or isinstance(item, bool) for item in delivery_ids)
             ):
                 raise ValueError("Invalid outbox chunk")
-            chunks.append(DigestChunk(text=text, delivery_ids=tuple(delivery_ids)))
+            # Payloads queued before buttons existed have no "buttons" key.
+            buttons = raw.get("buttons", [])
+            if not isinstance(buttons, list) or any(
+                not isinstance(button, list)
+                or len(button) != 2
+                or not isinstance(button[0], int)
+                or isinstance(button[0], bool)
+                or not isinstance(button[1], str)
+                or not button[1]
+                for button in buttons
+            ):
+                raise ValueError("Invalid outbox chunk")
+            chunks.append(
+                DigestChunk(
+                    text=text,
+                    delivery_ids=tuple(delivery_ids),
+                    buttons=tuple(EventButton(event_id, label) for event_id, label in buttons),
+                )
+            )
         if not chunks:
             raise ValueError("Empty outbox payload")
         return tuple(chunks)

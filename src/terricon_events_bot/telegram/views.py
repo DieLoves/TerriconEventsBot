@@ -876,6 +876,12 @@ class TelegramViews:
             ),
         )
 
+    def event_unavailable(self, user: User) -> Screen:
+        return Screen(
+            text=self._escape(self._text(user.locale, "notifications.cancelled")),
+            keyboard=self._keyboard(((self._menu_button(user.locale),),)),
+        )
+
     def invalid_action(self, user: User) -> Screen:
         return Screen(
             text=self._escape(self._text(user.locale, "errors.invalid_action")),

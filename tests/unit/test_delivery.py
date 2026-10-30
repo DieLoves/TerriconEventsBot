@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from terricon_events_bot.application.delivery import (
     DigestEntry,
     DigestRenderer,
+    EventButton,
     QuietHours,
 )
 from terricon_events_bot.domain.enums import Locale, NotificationType
@@ -142,3 +143,38 @@ def test_digest_entries_link_to_registration_but_not_cancellations() -> None:
 
     assert "• Meetup\n📅 01.01.2030 08:00\n🔗 https://share.kz/abc" in text
     assert "https://share.kz/old" not in text
+
+
+def digest_entry(
+    event_id: int, title: str, notification_type: NotificationType = NotificationType.NEW_EVENT
+) -> DigestEntry:
+    return DigestEntry(
+        event_id=event_id,
+        delivery_ids=(event_id * 10,),
+        notification_type=notification_type,
+        title=title,
+        starts_at=utc(2030, 1, 1, 3),
+        changed_fields=("address",) if notification_type is not NotificationType.NEW_EVENT else (),
+    )
+
+
+def test_digest_offers_a_bot_button_for_each_new_event_only() -> None:
+    renderer = DigestRenderer(LocalizationCatalog.load(PROJECT_ROOT / "locales"), timezone=ALMATY)
+
+    (single, changes) = renderer.render(
+        (
+            digest_entry(1, "Meetup"),
+            digest_entry(2, "Changed", NotificationType.IMPORTANT_CHANGE),
+        ),
+        Locale.RU,
+    )
+    (several,) = renderer.render(
+        (digest_entry(3, "Short"), digest_entry(4, "Very " * 20 + "long")), Locale.KZ
+    )
+
+    assert single.buttons == (EventButton(1, "📋 Открыть в боте"),)
+    assert changes.buttons == ()
+    assert [button.event_id for button in several.buttons] == [3, 4]
+    assert several.buttons[0].label == "📋 Short"
+    assert several.buttons[1].label.endswith("…")
+    assert len(several.buttons[1].label) <= len("📋 ") + 40
