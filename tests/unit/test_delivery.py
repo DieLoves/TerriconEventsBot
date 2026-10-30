@@ -158,13 +158,14 @@ def digest_entry(
     )
 
 
-def test_digest_offers_a_bot_button_for_each_new_event_only() -> None:
+def test_digest_offers_a_bot_button_for_each_event_that_still_has_a_card() -> None:
     renderer = DigestRenderer(LocalizationCatalog.load(PROJECT_ROOT / "locales"), timezone=ALMATY)
 
     (single, changes) = renderer.render(
         (
             digest_entry(1, "Meetup"),
             digest_entry(2, "Changed", NotificationType.IMPORTANT_CHANGE),
+            digest_entry(5, "Cancelled", NotificationType.CANCELLATION),
         ),
         Locale.RU,
     )
@@ -173,7 +174,7 @@ def test_digest_offers_a_bot_button_for_each_new_event_only() -> None:
     )
 
     assert single.buttons == (EventButton(1, "📋 Открыть в боте"),)
-    assert changes.buttons == ()
+    assert changes.buttons == (EventButton(2, "📋 Открыть в боте"),)
     assert [button.event_id for button in several.buttons] == [3, 4]
     assert several.buttons[0].label == "📋 Short"
     assert several.buttons[1].label.endswith("…")

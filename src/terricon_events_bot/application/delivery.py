@@ -216,14 +216,15 @@ class DigestRenderer:
         return DigestChunk("\n\n".join(lines), tuple(delivery_ids), self._buttons(items, locale))
 
     def _buttons(self, items: Sequence[DigestEntry], locale: Locale) -> tuple[EventButton, ...]:
-        new_events = [
-            item for item in items if item.notification_type is NotificationType.NEW_EVENT
+        # A cancelled event has no card left to open.
+        openable = [
+            item for item in items if item.notification_type is not NotificationType.CANCELLATION
         ]
-        if len(new_events) == 1:
+        if len(openable) == 1:
             label = f"📋 {self._text(locale, 'notifications.open_event')}"
-            return (EventButton(new_events[0].event_id, label),)
+            return (EventButton(openable[0].event_id, label),)
         buttons = []
-        for item in new_events:
+        for item in openable:
             title = " ".join(item.title.split())
             if len(title) > _BUTTON_TITLE_LIMIT:
                 title = title[: _BUTTON_TITLE_LIMIT - 1].rstrip() + "…"
